@@ -1,0 +1,14 @@
+Map the serial communication between the laptop and the F.A.S.T. ECU
+
+Perhaps with a USB/Serial cable on a Mac laptop running VirtualBox. Or a Linux box?
+  Something watches/captures the port traffic. The USB port is attached to a Windows guest.
+
+  Does the laptop send the channel definition (dashboard) to the ECU upon ARM?
+  Does the ECU respond to commands, ECU_CMD_ACK, and if so, with what?
+  Does sending ARM while streaming cause the ECU to re-send the header?  
+    Or is it the laptop that writes the header, like:
+
+    Laptop user selects a dashboard (channel list), refresh rate. 
+    User selects ARM. Laptop opens file and writes header. 
+      Laptop forwards channel list and refresh rate to ECU. ECU ACKs.
+    Laptop sends TRIGGER. ECU ACKs, then begins dumping data lines. No header(s).

@@ -39,27 +39,25 @@ Each logging session (Section 3.D) produces exactly **one CSV file**. Files are 
 ### B. Frame Synchronizer & Packet Specification
 * **ECU Serial Link Configuration:** Baud rate fixed strictly to **9600 bps**, 8 Data Bits, 1 Stop Bit, No Parity. Record layout and value conversion: see Section 3.C. Starting and stopping the stream: see Section 3.D.
 * **GPS Serial Link Configuration:** Typically **9600 bps** or **115200 bps** (configurable via spec parameter), reading standard NMEA-0183 sentences.
-* **Unified Output CSV Schema (GPS Firstmost):**
-  The collector must stitch the asynchronous streams together by caching the most recent valid GPS lock and appending the incoming 10Hz ECU data frames. The output schema order must strictly be:
+* **Unified Output CSV Schema (GPS Firstmost, then ECU channels from the session header):**
+  The collector must stitch the asynchronous streams together by caching the most recent valid GPS lock and appending the incoming 10Hz ECU data frames. The ECU can be configured to deliver **different channels, in different orders**, so the ECU columns are **not fixed**. They come from the channel table in each session's header (3.C.3). The column order is:
   1. **GPS_Timestamp**: ISO-8601 formatted time string (`YYYY-MM-DDTHH:MM:SS.FFFZ`) parsed from GPS.
   2. **GPS_Latitude**: Decimal degrees representation.
   3. **GPS_Longitude**: Decimal degrees representation.
   4. **GPS_Speed_MPH**: Ground speed calculated directly from GPS knots ($1 \text{ knot} = 1.15078 \text{ mph}$).
-  5. **TPS (%)**: Throttle Position Sensor from ECU.
-  6. **RPM**: Engine Revolutions per Minute from ECU.
-  7. **Battery (V)**: System supply voltage from ECU.
-  8. **Actual A/F**: Wideband oxygen sensor tracking from ECU.
-  9. **Target A/F**: Base tuning profile reference from ECU.
-  10. **O2 Corr. (%)**: Closed-loop fueling offsets from ECU.
-  11. **MAP (PSIA)**: Manifold Absolute Pressure from ECU (Converted from kPa).
-  12. **Air Temp (*F)**: Intake temperature readings (Analog Count Conversion).
-  13. **Coolant (*F)**: Engine coolant tracking (Analog Count Conversion).
-  14. **Spark (*BTDC)**: Ignition timing degrees from ECU.
-  15. **Inj. DC (%)**: Injector duty cycle tracking from ECU.
+  5. **…then one column per ECU channel, in the order of the session's channel table.**
 
-### C. ECU Log File Format (derived from `ecu_sample.log`)
+  Rules for the ECU columns:
+  * **Column name** = the channel name from the header, with trailing spaces and NULs removed, exactly as the ECU spells it (e.g. `TPS (%)`, `Air Temp(*F)`, `Fuel #s/hr`).
+  * **Raw columns:** a channel whose conversion is not yet known (3.C.6) is written as its raw count, and ` [raw]` is appended to its name (e.g. `Coolant(*F) [raw]`).
+  * **Duplicate names:** if two channels in one header have the same name, the second becomes `<name> #2`, the third `<name> #3`, and so on.
+  * **Number format:** converted values use the decimal places of the channel's printf format (e.g. `%5.2f` → 2 decimals), with no padding. Raw counts are written as integers.
+  * **Matching channels:** code that needs a particular channel (plots, conversions) must find it by **name** or by the header's channel index (3.C.2), never by column position or by channel ID. Channel IDs are not unique (3.C.3).
+  * Examples: `ecu_sample.log` gives 11 ECU columns starting `TPS (%), RPM, Battery (V), …`; `ecu_sample_2.log` gives 13 starting `Scaled RPM, Coolant(*F) [raw], Actual A/F, …`.
 
-This section documents the binary layout of `ecu_sample.log`, a log saved by the F.A.S.T. ECU software. It was reverse-engineered from that one 82,968-byte sample; every offset below was verified against it. Items marked **[TBD]** are not yet confirmed.
+### C. ECU Log File Format (derived from `ecu_sample.log` and `ecu_sample_2.log`)
+
+This section documents the binary layout of `ecu_sample.log`, a log saved by the F.A.S.T. ECU software. It was reverse-engineered from two samples: `ecu_sample.log` (11 channels, 3,146 records, collected at a density altitude of about 6,000 ft) and `ecu_sample_2.log` (13 channels in a different order, 634 records, collected at a density altitude of about 150 ft and 75 °F). Every offset below was verified against both. Items marked **[TBD]** are not yet confirmed.
 
 > **Note:** No ECU frame-marker or sync sequence exists in this format. The bytes `AA 45 E0` cited in earlier drafts are not a marker: they are the low bytes of four 16-bit header values (15, 170, 325, 480) at offset 132. Parsers must not search for them.
 
@@ -72,15 +70,15 @@ This section documents the binary layout of `ecu_sample.log`, a log saved by the
 
 | Offset (dec) | Size | Content |
 |---|---|---|
-| 0 | 2 | Format/version tag: ASCII `"22"` (`0x32 0x32`) **[TBD meaning]** |
+| 0 | 2 | Format/version tag: ASCII `"22"` (`0x32 0x32`). The same in both samples; the parser should log a warning if it is different. |
 | 2 | 2 | `u16` channel count *N* (sample: **11**) |
-| 4 | 22 | Eleven `u16` values: `4, 0, 5, 45, 27, 24, 30, 3, 2, 10, 12`. Possibly a date/time or session settings **[TBD]** |
-| 26 | 490 | Display/layout settings for the ECU software (e.g. `u16` 15, 170, 325, 480 at 132; `f32` 420.0 ×4 and 440.0 ×4 at 262). Ignored by the collector. |
+| 4 | 2 × *N* | **Channel index array:** one `u16` per channel, in channel-table order. It appears to identify the channel in the ECU software's list of loggable values. It is consistent across both samples: RPM = 0, Coolant = 2, Air Temp = 3, TPS = 4, Battery = 5, Spark = 10, Inj. DC = 12, Scaled RPM = 15, O2 Corr. = 24, Target A/F = 27, MAP = 30, Actual A/F = 45, Fuel #s/hr = 52. The space runs to offset 132, which would allow up to 64 channels **[TBD]**. |
+| 4 + 2*N* to 516 | — | Display/layout settings for the ECU software, identical in both samples (e.g. `u16` 15, 170, 325, 480 at 132; `f32` 420.0 ×4 and 440.0 ×4 at 262). Ignored by the collector. |
 | 516 | 58 × *N* | Channel definition table (C.3) |
 | 516 + 58*N* | 18 | Data block header (C.4) — at offset 1154 in the sample |
 | 534 + 58*N* | record size × count | Data records (C.5) — from offset 1172 in the sample |
 
-`516` is treated as a fixed offset until a second sample confirms or refutes it.
+`516` is a fixed offset: it is the same in both samples even though their channel counts differ (11 and 13).
 
 #### C.3 Channel definition (58 bytes each, in record-column order)
 
@@ -88,7 +86,7 @@ This section documents the binary layout of `ecu_sample.log`, a log saved by the
 |---|---|---|
 | 0 | `char[16]` | Channel name |
 | 16 | `char[10]` | Unit label (often empty) |
-| 26 | `u16` | Channel ID — likely the ECU memory/parameter address **[TBD]** |
+| 26 | `u16` | Channel ID: probably the ECU memory/parameter address the value is read from. **Not unique:** `Inj. DC (%)` and `Fuel #s/hr` both use 0xB5 and carry identical raw values. Do not use it to identify a channel. |
 | 28 | `u16` | Conversion code (C.6) |
 | 30 | `f32` | Scale |
 | 34 | `f32` | Offset |
@@ -100,7 +98,7 @@ This section documents the binary layout of `ecu_sample.log`, a log saved by the
 
 Python: `struct.unpack_from('<16s10sHHffHHff8s', buf, 516 + 58*i)`
 
-Channel table in the sample (the last column is the first record decoded as `raw × scale + offset`):
+Channel table in `ecu_sample.log` (the last column is the first record decoded as `raw × scale + offset`):
 
 | # | Name | Unit | ID | Conv | Scale | Offset | Display range | Format | Record 0 |
 |---|---|---|---|---|---|---|---|---|---|
@@ -116,6 +114,24 @@ Channel table in the sample (the last column is the first record decoded as `raw
 | 9 | `Spark(*BTDC)` | | 0x83 | 0 | 0.25 | 0 | 0 to 100 | `%5.2f` | 143 → 35.75° |
 | 10 | `Inj. DC (%)` | | 0xB5 | 4 | 0.128 | 0 | 0 to 100 | `%5.1f` | 41 → 5.2 % |
 
+Channel table in `ecu_sample_2.log`: the same definitions in a different order, plus two new channels:
+
+| # | Name | ID | Conv | Scale | Display range | Record 0 raw |
+|---|---|---|---|---|---|---|
+| 0 | `Scaled RPM` (new) | 0x45 | 6 | 1 | 0 to 10000 | 59 |
+| 1 | `Coolant(*F)` | 0x24 | 1 | 1 | −40 to 250 | 74 |
+| 2 | `Actual A/F` | 0x96 | 0 | 0.0625 | 9 to 17 | 227 |
+| 3 | `Battery (V)` | 0x26 | 0 | 0.108 | 8 to 17 | 108 |
+| 4 | `TPS (%)` | 0x22 | 0 | 0.392157 | 0 to 100 | 41 |
+| 5 | `Spark(*BTDC)` | 0x83 | 0 | 0.25 | 0 to 100 | 140 |
+| 6 | `O2 Corr. (%)` | 0x4A | 0 | 0.78125 | −50 to 50 | 159 |
+| 7 | `Inj. DC (%)` | 0xB5 | 4 | 0.128 | 0 to 100 | 41 |
+| 8 | `MAP (PSIA)` | 0x2A | 8 | 1 | −13 to 50 | 203 |
+| 9 | `Air Temp(*F)` | 0x28 | 1 | 1 | −40 to 200 | 222 |
+| 10 | `Target A/F` | 0x92 | 0 | 0.0625 | 9 to 17 | 217 |
+| 11 | `Fuel #s/hr` (new) | 0xB5 | 10 | 0.128 | 0 to 1600 | 41 |
+| 12 | `RPM` | 0x46 | 5 | 50 | 400 to 12500 | 44 |
+
 #### C.4 Data block header (18 bytes)
 
 | Rel. offset | Type | Field | Sample value |
@@ -123,11 +139,11 @@ Channel table in the sample (the last column is the first record decoded as `raw
 | 0 | `u16` | Record size in bytes (= 4 + 2*N*) | 26 |
 | 2 | `u16` | Reserved | 0 |
 | 4 | `u32` | Record count | 3146 |
-| 8 | `u16` | **[TBD]** (possibly a sample-interval code) | 8 |
+| 8 | `u16` | Unknown; 8 in both samples. Ignored. | 8 |
 | 10 | `u16` | Reserved | 0 |
-| 12 | `u16` | **[TBD]** | 650 |
-| 14 | `u16` | **[TBD]** | 600 |
-| 16 | `u16` | **[TBD]** | 1 |
+| 12 | `u16` | Unknown; 650 in both samples. Ignored. | 650 |
+| 14 | `u16` | Unknown; 600 in both samples. Ignored. | 600 |
+| 16 | `u16` | Unknown; 1 in both samples. Ignored. | 1 |
 
 In the sample, `data_start + record_size × record_count` equals the file length exactly. The parser must check that and, if the file is shorter (a log cut off by power loss), process only the complete records.
 
@@ -141,7 +157,7 @@ In the sample, `data_start + record_size × record_count` equals the file length
 Python: `struct.unpack_from('<I' + 'H'*N, buf, data_start + k*record_size)`
 
 Sample properties:
-* 3,146 records over 314.5 s. The interval between records is 78–125 ms (median 94 ms), so the rate is about **10 Hz but not perfectly regular**. Rows must be timestamped from the ms field, not by assuming 100 ms steps.
+* 3,146 records over 314.5 s (sample 1) and 634 records over 63.3 s (sample 2). Both average **exactly 100 ms** per record (in sample 2, record 100 is at 10,000 ms and record 300 at 30,000 ms). Individual intervals jitter between 78 and 125 ms. Rows must be timestamped from the ms field, not by assuming even 100 ms steps.
 * The timestamp strictly increases.
 * Every raw value is 0–255 (the high byte is always 0). The ECU therefore sends 8-bit values that are stored as `u16`.
 
@@ -151,11 +167,31 @@ Sample properties:
 |---|---|---|
 | 0 | TPS, Battery, A/F, Target A/F, O2 Corr., Spark | `value = raw × scale + offset` (confirmed plausible) |
 | 5 | RPM | Linear `raw × scale` gives sensible RPM (raw 80 → 4000). Treated as linear; meaning of code 5 **[TBD]** |
+| 6 | Scaled RPM | Not linear with the file's scale (scale = 1). Its raw count tracks about 4/3 of the RPM count (≈ 37.5 rpm per count, against RPM's 50) but the exact rule is **[TBD]**. Written raw. |
+| 10 | Fuel #s/hr | Computed by the ECU software from injector duty cycle: its raw values equal `Inj. DC (%)` in every record. The conversion presumably needs injector flow rate and possibly RPM, which are not in the file **[TBD]**. Written raw. |
 | 4 | Inj. DC | Linear `raw × scale` gives sensible duty cycle. Treated as linear; meaning of code 4 **[TBD]** |
 | 1 | Air Temp, Coolant | Non-linear thermistor lookup. Scale = 1 and offset = 0, so the conversion is **not** carried in the file. A raw-count → °F table is required **[TBD]**. Observed raw range: coolant 21–39, air 89–128. Coolant raw falls as the engine warms, which suggests a lower count means hotter. |
-| 8 | MAP | Non-linear or sensor-specific. Scale = 1 and offset = 0, observed raw range 11–209, display range −13 to 50. The conversion to PSIA (and whether the raw value is kPa) is **[TBD]**. |
+| 8 | MAP | Sensor-specific; the file gives scale = 1, offset = 0. **Provisional: `psia ≈ raw × 0.0597`**, i.e. about 0.41 kPa per count with no offset (255 counts ≈ 15.2 psia ≈ 105 kPa, the range of a typical 1-bar sensor). See the MAP notes below. **[TBD: confirm]** |
 
-Until the lookups for codes 1 and 8 are known, the collector writes the **raw count** for those channels and flags them in the CSV header (for example `Coolant (*F) [raw]`). It must never write an invented approximation.
+**MAP notes (from the two samples):**
+* Higher count means higher pressure. Engine off, sample 2 reads a steady 245 for 10 s at about 150 ft (standard atmosphere ≈ 14.62 psia), so ≈ 0.0597 psia per count.
+* Sample 1 (about 6,000 ft density altitude) reads 206 engine-off. With the factor above, that is 12.29 psia, a pressure altitude of about 4,900 ft. That is consistent with a 6,000 ft density altitude on a warm day. The reading is weak evidence, though: it comes from only 4 records, taken while the ECU's supply voltage was collapsing.
+* A two-point straight-line fit through both engine-off readings (taking the standard pressures for 6,000 ft and 150 ft) is **rejected**: it gives negative pressures below about 45 counts, and both samples go as low as 11–14 counts on deceleration.
+* Sanity check with the provisional factor: full throttle reads 196–203 counts at 6,000 ft and 236–241 at 150 ft, about 97 % of engine-off pressure in both cases, as expected for an engine without boost. Deceleration lows of 11–14 counts come out at 0.7–0.8 psia, which is lower than usual. A small offset (a sensor that bottoms out above 0 psia) cannot be ruled out.
+* The display range of −13 to 50 is not explained by this conversion **[TBD]**.
+
+**Configurable conversions:** each unknown conversion is a parameter in `/etc/ecu_hub/collector.conf`, unset by default, matched by channel **name**:
+
+| Parameter | Default | When set |
+|---|---|---|
+| `MAP_PSIA_PER_COUNT`, `MAP_PSIA_OFFSET` | unset (provisional values: 0.0597, 0) | `MAP (PSIA)` is written as `raw × per_count + offset` |
+| `TEMP_TABLE_COOLANT`, `TEMP_TABLE_AIR` | unset | Path to a two-column CSV (raw count, °F), linearly interpolated |
+| `SCALED_RPM_PER_COUNT` | unset | `Scaled RPM` is written as `raw × value` |
+| `FUEL_LBHR_PER_COUNT` | unset | `Fuel #s/hr` is written as `raw × value` |
+
+While a parameter is unset, the collector writes the **raw count** for that channel and flags it in the CSV header (for example `Coolant(*F) [raw]`, see 3.B). It must never write an invented approximation.
+
+**Quickest way to confirm these conversions:** open `ecu_sample_2.log` in the F.A.S.T. PC software and note the displayed MAP, Coolant, Air Temp, Scaled RPM and Fuel #s/hr at a few points, for example t = 0 s, 30 s and 60 s (raw MAP 203 / 238 / 245, Coolant 74 / 66 / 56). Each pair of displayed and raw values is one calibration point.
 
 #### C.7 Relationship to the live serial stream
 This format describes a **saved log file**. What is known about the live 9600-bps stream:
@@ -166,7 +202,7 @@ This format describes a **saved log file**. What is known about the live 9600-bp
 Record boundaries come from the header: once the reader has parsed the header at the start of a session, it reads fixed-size records of `record_size` bytes. A strictly increasing ms field is the sanity check. Byte-pattern searches are not acceptable.
 
 #### C.8 Acceptance check for the parser
-A reference parser, given `ecu_sample.log`, must report: 11 channels with the names in C.3, a record size of 26, 3,146 records, first timestamp 0 ms, last timestamp 314,500 ms, and a first record of TPS 21.6 %, RPM 4000, Battery 10.8 V, Actual A/F 12.81, Target A/F 13.38, O2 Corr. 23.4 %, Spark 35.75°, Inj. DC 5.2 %.
+A reference parser, given `ecu_sample_2.log`, must report 13 channels in the order of the second table in C.3, a record size of 30, 634 records, and a last timestamp of 63,296 ms. Given `ecu_sample.log`, it must report: 11 channels with the names in C.3, a record size of 26, 3,146 records, first timestamp 0 ms, last timestamp 314,500 ms, and a first record of TPS 21.6 %, RPM 4000, Battery 10.8 V, Actual A/F 12.81, Target A/F 13.38, O2 Corr. 23.4 %, Spark 35.75°, Inj. DC 5.2 %.
 
 ### D. Controlling the Log Stream (ARM / TRIGGER)
 
@@ -257,7 +293,7 @@ A header arriving on its own (for example, logging started from the ECU's softwa
 * **Asynchronous Multi-Threaded Read Loop:** 
   * Thread A continuously monitors the GPS USB serial interface port, extracting lat/long coordinates and speed. It handles NMEA conversions, notably multiplying knots data fields by `1.150779` to derive instantaneous integer or float **MPH values**.
   * Thread B manages the high-frequency ECU input buffer, matching incoming frames with the latest thread-safe memory snapshot of current GPS spatial tracking data.
-* **Analog Temperature Processing:** Maps raw analog count integers (0-255) to precise Fahrenheit parameters using standard lookup parameters or NTC thermistor calibration tracking.
+* **Value Conversion:** Converts raw counts to engineering units using each channel's scale and offset from the header. Channels whose conversion is not carried in the file (temperatures, MAP, Scaled RPM, Fuel #s/hr) use the configurable conversions in Section 3.C.6, and are written raw until those are set.
 * **Stream Control & Sessions:** The collector runs the ARM/TRIGGER sequence and the session rules in Section 3.D, and writes one CSV file per session in the layout of Section 3.A.
 * **Dynamic Flushing:** Unified records are buffered dynamically and flushed to disk targets every 1–2 seconds to prevent file corruption during engine power-downs.
 
@@ -267,7 +303,7 @@ A header arriving on its own (for example, logging started from the ECU's softwa
 * Shows the collector's state from `STATUS`, with **New session** and **Stop logging** buttons that send `NEW_SESSION` and `STOP` over the control socket (Section 3.D.4).
 
 ### Tier 3: Visualization Generator
-* Provides a selection interface allowing users to select a log, choose multiple variable fields (e.g., graphing engine `RPM` alongside vehicle `GPS_Speed_MPH`), and trigger plot graphics rendering.
+* Provides a selection interface allowing users to select a log, choose multiple variable fields from that CSV's own header row (columns differ between sessions; see 3.B), for example graphing engine `RPM` alongside vehicle `GPS_Speed_MPH`, and trigger plot graphics rendering.
 * **Server-Side Render Boundary:** The daemon invokes matplotlib to output static plot graphics directly inside the active log subdirectory next to the target `.csv` stream.
 * **OOM Prevention Loop:** Explicitly handles garbage cleanup inside render loops using `plt.close(fig)` to protect the 1GB RAM system.
 
@@ -276,6 +312,7 @@ A header arriving on its own (for example, logging started from the ECU's softwa
 * Emulates both hardware serial interfaces simultaneously using internal background simulator loops.
 * Feeds realistic, moving metrics strings:
   * Telemetry cycles stepping RPM through normal rev bands.
+  * A replay option that streams the header and records of `ecu_sample.log` or `ecu_sample_2.log` after TRIGGER, so both channel layouts (11 and 13 channels, different orders) can be tested.
   * A mock ECU that obeys ARM and TRIGGER, with a switch that makes it ignore commands (silent) or drop out mid-session, to test the polling in 3.D.5. It stays silent after ARM, and after TRIGGER sends a header in the format of 3.C followed by records. It recognizes the command bytes from the same `ECU_CMD_*` parameters; when those are unset, it uses mock-only placeholder values so the full sequence can still be tested.
   * Spatial route generation loop modifying latitude and longitude over an imaginary driving path, calculating step velocities to cleanly mock logical non-zero `GPS_Speed_MPH` data fields.
 
@@ -301,7 +338,7 @@ The web interface accesses service toggles securely by using explicit sudo autho
 ## 7. Acceptance Validation Criteria
 
 An execution workflow is valid only when matching these specific checks:
-1. Executing `python collector.py --mock` accurately instantiates simultaneous generation tasks, producing merged CSV logs with columns matching the structural order layout definitions.
+1. Executing `python collector.py --mock` accurately instantiates simultaneous generation tasks, producing merged CSV logs whose columns are the four GPS columns followed by the ECU channels in the order of the session header (3.B). Replaying `ecu_sample.log` and then `ecu_sample_2.log` produces two files with 11 and 13 ECU columns respectively, each in its own header's order.
 2. Each session produces exactly one file, `data/YYYY-MM-DD/log_HHMM.csv`, named from the session start time. A session that runs past the top of the hour or past midnight stays in that one file. Two sessions started in the same minute produce `log_HHMM.csv` and `log_HHMM_2.csv`.
 3. Graph layout requests processing `GPS_Speed_MPH` vs engine factors render smoothly, verifying that active memory usage traces stay flat over sequential rendering checks.
 4. In mock mode, `NEW_SESSION` makes the collector send ARM then TRIGGER, and a new file is created. `STOP` sends ARM and closes the file. A header that arrives mid-session starts a new file. With the `ECU_CMD_*` parameters unset on real hardware, the collector sends nothing to the ECU and still logs any stream that the ECU starts by itself.
