@@ -36,6 +36,7 @@ PARAMS = [
     # For a dynamic list, name a log file saved by C-Com WP instead: the collector then
     # takes the channels and their order from that log's header at each session start,
     # so replacing the log changes what is logged without editing anything else.
+    # Example: ('ECU_CHANNEL_TEMPLATE', str, '/etc/ecu_hub/channels.log', #
     ('ECU_CHANNEL_TEMPLATE', str, os.path.join(HERE, 'CHANNEL_TEMPLATE.txt'),
      'channel template: a text template, or a C-Com log file for a dynamic list'),
     ('ECU_POLL_INTERVAL_MS', float, 100, 'time between polls'),
