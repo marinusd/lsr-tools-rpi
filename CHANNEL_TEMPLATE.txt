@@ -6,6 +6,10 @@
 # a # in front of it. The ECU accepts 11 channels at most until a longer
 # poll table has been confirmed (spec.md 3.D.2).
 #
+# For a dynamic list, set ECU_CHANNEL_TEMPLATE to a log file saved by C-Com WP
+# instead of this file: the channels and their order then come from that
+# log's header.
+#
 #   name, unit    as shown by the PC software
 #   index         the PC software's channel number; sets the poll-table order
 #   id            ECU RAM address of the value (hex)
