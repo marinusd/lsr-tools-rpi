@@ -1,0 +1,35 @@
+# ECU and GPS data collector (spec.md section 5).
+# Installed by deploy/install.sh as /etc/systemd/system/ecu-collector.service
+[Unit]
+Description=ECU and GPS data collector
+Documentation=file:/opt/ecu_hub/spec.md
+
+[Service]
+Type=simple
+User=ecu-collector
+Group=ecu-hub
+# dialout: the ECU and GPS serial ports
+SupplementaryGroups=dialout
+# CAP_SYS_TIME: lets the collector set the system clock from GPS without being root
+AmbientCapabilities=CAP_SYS_TIME
+CapabilityBoundingSet=CAP_SYS_TIME
+# group-writable files and directories, so ecu-web (group ecu-hub) can put plots next to the logs
+UMask=0002
+# /run/ecu_hub for the control socket; only ecu-collector and group ecu-hub can enter
+RuntimeDirectory=ecu_hub
+RuntimeDirectoryMode=0750
+# /var/log/ecu_hub; the collector makes data/ inside it
+LogsDirectory=ecu_hub
+LogsDirectoryMode=0775
+WorkingDirectory=/opt/ecu_hub
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /opt/ecu_hub/collector.py
+# The collector keeps running while the ECU is off (it retries every 60 s).
+# It is restarted only if it exits with an error.
+Restart=on-failure
+RestartSec=5
+# On stop the collector closes the current file; it sends nothing to the ECU.
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,33 @@
+# /etc/ecu_hub/collector.conf
+# Settings for collector.py and server.py. Every line is optional; the values
+# shown are the defaults unless marked otherwise. See spec.md 3.D.6 and 3.C.6.
+
+# --- serial ports -----------------------------------------------------------
+# The ECU adapter and the GPS are both USB serial devices, and /dev/ttyUSB0
+# can change between boots. Find the stable names with:  ls -l /dev/serial/by-id/
+# ECU_PORT = /dev/serial/by-id/usb-Prolific_Technology_Inc._USB-Serial_Controller_D-if00-port0
+# GPS_PORT = /dev/serial/by-id/<your GPS>
+ECU_PORT = /dev/ttyUSB0
+GPS_PORT = /dev/ttyACM0
+GPS_BAUD = 9600
+
+# --- channels ---------------------------------------------------------------
+# Default: the fixed list in CHANNEL_TEMPLATE.txt next to collector.py.
+# For a dynamic list, name a log file saved by C-Com WP instead.
+# ECU_CHANNEL_TEMPLATE = /etc/ecu_hub/channels.log
+# ECU_POLL_TABLE_MAX_CHANNELS = 11
+
+# --- behaviour ---------------------------------------------------------------
+# ECU_AUTOSTART = true
+# ECU_POLL_INTERVAL_MS = 100
+# ECU_RETRY_INTERVAL_S = 60
+# GPS_SYNC_WAIT_S = 60
+# FILE_TIMEZONE = America/Los_Angeles      (default: the Pi's time zone)
+
+# --- conversions (unset = the channel is written as raw counts) -------------
+# MAP_PSIA_PER_COUNT = 0.0597
+# MAP_PSIA_OFFSET = 0
+# TEMP_TABLE_COOLANT = /etc/ecu_hub/coolant.csv
+# TEMP_TABLE_AIR = /etc/ecu_hub/air.csv
+# SCALED_RPM_PER_COUNT =
+# FUEL_LBHR_PER_COUNT =

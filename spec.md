@@ -333,11 +333,16 @@ The command bytes (`FC`, `FD`, `FE`) and the poll-table base address `0x00B6` ar
 ### Tier 2: File Delivery Web Interface (`server.py`)
 * Exposes a fast directory index mapping `/var/log/ecu_hub/data/`.
 * Renders a native anchor tree list layout allowing operators to seamlessly navigate the day directories, see that day's session files (one per session, newest first), and download target merged `.csv` files.
-* Shows the collector's state from `STATUS`, with **New session** and **Stop logging** buttons that send `NEW_SESSION` and `STOP` over the control socket (Section 3.D.4).
+* Shows the collector's state from `STATUS`, with **New session** and **Stop logging** buttons that send `NEW_SESSION` and `STOP` over the control socket (Section 3.D.4). The status page refreshes itself every 5 seconds.
+* A **Restart collector service** button runs `sudo -n systemctl restart ecu-collector.service` (Section 5). It is the way to recover when the collector is not running and `STATUS` cannot be reached.
+* Only names of the forms `YYYY-MM-DD` or `unsynced` (directories), `log_*.csv` and `plot_*.png` are served. Anything else returns 404.
 
 ### Tier 3: Visualization Generator
 * Provides a selection interface allowing users to select a log, choose multiple variable fields from that CSV's own header row (columns differ between sessions; see 3.B), for example graphing engine `RPM` alongside vehicle `GPS_Speed_MPH`, and trigger plot graphics rendering.
 * **Server-Side Render Boundary:** The daemon invokes matplotlib to output static plot graphics directly inside the active log subdirectory next to the target `.csv` stream.
+* **Plot layout:** one panel per chosen column, stacked, sharing the time axis (columns differ too much in scale to share one axis). The time axis is seconds from the first row, from `GPS_Timestamp`; if any row has no GPS time, it is the row number instead.
+* **Plot file name:** `plot_HHMM[_N]_<Metrics>.png`, where `<Metrics>` is the chosen column names in file order, each reduced to letters, digits and `_`, joined by `-` (for example `plot_1432_GPS_Speed_MPH-RPM.png`). Drawing the same selection again replaces the file.
+* **Lazy start:** matplotlib is imported on the first plot request, not at start-up, to keep the idle web server small.
 * **OOM Prevention Loop:** Explicitly handles garbage cleanup inside render loops using `plt.close(fig)` to protect the 1GB RAM system.
 
 ### Tier 4: Mock Generation & Simulation Layer (`mock_serial.py`)
@@ -356,7 +361,14 @@ The command bytes (`FC`, `FD`, `FE`) and the poll-table base address `0x00B6` ar
 The process management deployment leverages two systemd configuration engines:
 * `ecu-collector.service`: Starts at system boot, initializes the GPS serial link first to synchronize time parameters, then by default starts a session by writing the poll table and polling the ECU (Section 3.D). If the ECU does not respond, it retries every 60 s until it does (3.D.5); the service keeps running and does not exit or restart because of this. On stop it stops polling and closes the current file.
 * `ecu-web.service`: Serves the application directory interface on port `8080`.
-The web interface accesses service toggles securely by using explicit sudo authorization rule mappings written inside `/etc/sudoers.d/ecu_control`.
+The web interface accesses service toggles securely by using explicit sudo authorization rule mappings written inside `/etc/sudoers.d/ecu_control`. The rule allows the `ecu-web` user exactly one command: `systemctl restart ecu-collector.service`.
+
+Deployment details (files in `deploy/`, installed by `deploy/install.sh` to `/opt/ecu_hub`):
+* **Accounts:** the collector runs as `ecu-collector`, the web interface as `ecu-web`. Both have the primary group `ecu-hub`, and neither is root.
+* **Collector privileges:** group `dialout` for the serial ports, and the single capability `CAP_SYS_TIME` so that it can set the clock from GPS.
+* **Shared files:** both services use umask 0002, so logs and day directories are group-writable and the web interface can write plots next to the CSV files.
+* **Control socket:** systemd creates `/run/ecu_hub` (mode 0750, group `ecu-hub`) for the collector; the socket inside is mode 0660. Only `ecu-collector` and members of `ecu-hub` can reach it.
+* **Settings:** both services read `/etc/ecu_hub/collector.conf`.
 
 ---
 
