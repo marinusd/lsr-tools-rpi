@@ -1,0 +1,28 @@
+# ECU channel template for collector.py (ECU_CHANNEL_TEMPLATE).
+# Extracted from ecu_sample.log.
+#
+# One line per channel. The order of the lines is the order of the ECU
+# columns in the CSV files. To leave a channel out, delete its line or put
+# a # in front of it. The ECU accepts 11 channels at most until a longer
+# poll table has been confirmed (spec.md 3.D.2).
+#
+#   name, unit    as shown by the PC software
+#   index         the PC software's channel number; sets the poll-table order
+#   id            ECU RAM address of the value (hex)
+#   conv          conversion code (spec.md 3.C.6)
+#   scale, offset value = raw x scale + offset, for conv 0, 4 and 5
+#   display_min, display_max, format   range and printf format for display
+#
+# Do not change index, id, conv, scale or offset: they describe the ECU.
+name,unit,index,id,conv,scale,offset,display_min,display_max,format
+TPS (%),%,4,0x22,0,0.39215687,0,0,100,%5.0f
+RPM,,0,0x46,5,50,0,400,12500,%5.0f
+Battery (V),VDC,5,0x26,0,0.108,0,8,17,%5.1f
+Actual A/F,,45,0x96,0,0.0625,0,9,17,%5.2f
+Target A/F,,27,0x92,0,0.0625,0,9,17,%5.1f
+O2 Corr. (%),,24,0x4A,0,0.7813,-100,-50,50,%5.1f
+MAP (PSIA),,30,0x2A,8,1,0,-13,50,%5.1f
+Air Temp(*F),(*F),3,0x28,1,1,0,-40,200,%5.1f
+Coolant(*F),Deg (*F),2,0x24,1,1,0,-40,250,%5.1f
+Spark(*BTDC),,10,0x83,0,0.25,0,0,100,%5.2f
+Inj. DC (%),,12,0xB5,4,0.128,0,0,100,%5.1f

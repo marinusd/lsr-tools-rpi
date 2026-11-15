@@ -235,6 +235,7 @@ All four are Verified (13 block reads, 12 writes, 228 polls, every checksum corr
 * **Poll reply:** `FC` returns *N* value bytes in table order and one checksum byte, about 13 ms after the echo for 11 channels (Verified). The collector reads exactly *N* + 1 bytes within `ECU_REPLY_TIMEOUT_MS` and checks the checksum.
 * **Captured example (11 channels):** table `46 24 28 22 26 83 B5 4A 92 2A 96 00` at `0x00B6`–`0x00C1` (RPM, Coolant, Air Temp, TPS, Battery, Spark, Inj. DC, O2 Corr., Target A/F, MAP, Actual A/F); reply `00 B2 FE 1C 6C 50 00 80 00 F0 FF F7`.
 * **Channel template:** the channels of a session come from the header of a C-Com log file (3.C) named by `ECU_CHANNEL_TEMPLATE`. To change the logged channels, the operator sets up the dashboard in the PC software, saves a short log, and copies that file to the Pi. Only the header is used. The collector reads the template at the start of every session.
+* **Text template:** `ECU_CHANNEL_TEMPLATE` may instead name a text file holding the same channel table, one channel per line, with the columns `name, unit, index, id, conv, scale, offset, display_min, display_max, format`. Lines starting with `#` are comments. The order of the lines is the order of the ECU columns in the CSV; the poll table is still written in ascending `index` order. `python3 ecu_log.py LOGFILE --template OUT.txt` writes such a file from a C-Com log. The repository's `CHANNEL_TEMPLATE.txt`, extracted from `ecu_sample.log` (11 channels starting `TPS (%), RPM, Battery (V)`), is the normal channel set and order.
 * **Write guard (safety):** `FE` changes ECU memory. The collector must refuse to send any `FE` whose address is outside `0x00B6` … `0x00B6 + ECU_POLL_TABLE_MAX_CHANNELS`, and must have no other code path that sends `FE`. Only `0x00B6`–`0x00C1` (11 channels and the end marker) were seen being written, so `ECU_POLL_TABLE_MAX_CHANNELS` defaults to **11**. A template with more channels is refused with a clear error until a capture confirms a longer table (D.7).
 * **What the PC does that the collector does not:** on connecting, the PC reads the 2 KB calibration (`0x7800`–`0x7FFF`) and three small values (`FF 00 54`, `FF 7F FF`, `FD 7F FD 7F FF`). None of the logging traffic depends on them. That they can be skipped is **[TBD]** until tried from a cold ECU.
 
@@ -294,7 +295,7 @@ Read at start-up from `/etc/ecu_hub/collector.conf`, each with a command-line ov
 | Parameter | Type | Default | Meaning |
 |---|---|---|---|
 | `ECU_PORT` | path | `/dev/ttyUSB0` | ECU serial device. A stable `/dev/serial/by-id/…` path is recommended, since the GPS is also a USB serial device. |
-| `ECU_CHANNEL_TEMPLATE` | path | `/etc/ecu_hub/channels.log` | C-Com log file whose header gives the session's channels (D.2) |
+| `ECU_CHANNEL_TEMPLATE` | path | `/etc/ecu_hub/channels.log` | Channel template for the session: a C-Com log file or a text template such as `CHANNEL_TEMPLATE.txt` (D.2). The collector tells them apart by content, not by file name. |
 | `ECU_POLL_INTERVAL_MS` | integer | `100` | Time between `FC` polls |
 | `ECU_ECHO_TIMEOUT_MS` | integer | `50` | Longest wait for the echo of one sent byte (observed: about 3 ms) |
 | `ECU_REPLY_TIMEOUT_MS` | integer | `60` | Longest wait for a complete `FC` reply after its echo (observed: about 13 ms for 11 channels). The identity check uses the same limit. |
