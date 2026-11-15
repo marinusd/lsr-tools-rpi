@@ -33,7 +33,7 @@ PARAMS = [
     # name, type, default, help
     ('ECU_PORT', str, '/dev/ttyUSB0', 'ECU serial device'),
     ('ECU_CHANNEL_TEMPLATE', str, '/etc/ecu_hub/channels.log',
-     'C-Com log file whose header gives the channels'),
+     'channel template: a text template or a C-Com log file'),
     ('ECU_POLL_INTERVAL_MS', float, 100, 'time between polls'),
     ('ECU_ECHO_TIMEOUT_MS', float, 50, 'longest wait for the echo of one byte'),
     ('ECU_REPLY_TIMEOUT_MS', float, 60, 'longest wait for a complete reply'),
@@ -60,7 +60,7 @@ PARAMS = [
 MOCK_DEFAULTS = {
     'DATA_DIR': os.path.join(HERE, 'mock_data'),
     'CONTROL_SOCKET': os.path.join(HERE, 'mock_data', 'control.sock'),
-    'ECU_CHANNEL_TEMPLATE': os.path.join(HERE, 'ecu_sample.log'),
+    'ECU_CHANNEL_TEMPLATE': os.path.join(HERE, 'CHANNEL_TEMPLATE.txt'),
 }
 
 
@@ -523,12 +523,9 @@ class Collector:
                                      self.cfg['ECU_REPLY_TIMEOUT_MS'] / 1000,
                                      self.cfg['ECU_POLL_TABLE_MAX_CHANNELS'])
             template = self.cfg['ECU_CHANNEL_TEMPLATE']
-            buf = ecu_log.read_bytes(template)
-            hdr = ecu_log.parse_header(buf, need_data_header=False)
-            if ecu_log.version_tag(buf) != b'22':
-                log.warning('%s: version tag is %r, expected "22"', template,
-                            ecu_log.version_tag(buf))
-            channels = hdr.channels
+            channels, note = ecu_log.load_template(template)
+            if note:
+                log.warning('%s: %s', template, note)
             order = ecu_log.poll_order(channels)
             names, funcs = make_converters(channels, self.cfg)
 

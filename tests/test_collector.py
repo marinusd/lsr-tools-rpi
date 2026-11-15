@@ -77,6 +77,26 @@ class ParserTest(unittest.TestCase):
         self.assertEqual(len(ecu_log.records(buf, hdr)), 174)
 
 
+class TemplateTest(unittest.TestCase):
+    def test_text_template_equals_the_log_it_came_from(self):
+        for sample in (SAMPLE_1, SAMPLE_2, FAST):
+            hdr, _ = load(sample)
+            again = ecu_log.parse_template_text(ecu_log.template_text(hdr.channels))
+            self.assertEqual(again, hdr.channels)
+
+    def test_shipped_template_is_ecu_sample(self):
+        channels, note = ecu_log.load_template(os.path.join(ROOT, 'CHANNEL_TEMPLATE.txt'))
+        self.assertIsNone(note)
+        self.assertEqual(channels, load(SAMPLE_1)[0].channels)
+
+    def test_bad_text_template(self):
+        with self.assertRaises(ecu_log.FormatError):
+            ecu_log.parse_template_text('name,unit\nRPM,\n')
+        good = ecu_log.template_text(load(SAMPLE_1)[0].channels)
+        with self.assertRaises(ecu_log.FormatError):
+            ecu_log.parse_template_text(good.replace('0x46', 'zz'))
+
+
 class LinkTest(unittest.TestCase):
     """spec.md 3.D.1 and 3.D.2, against the bytes seen in the capture"""
 
@@ -288,6 +308,16 @@ class CollectorTest(unittest.TestCase):
         self.assertEqual(self.state(), 'IDLE')
         self.c.commands.put('NEW_SESSION')
         self.assertTrue(wait_for(lambda: self.state() == 'LOGGING'))
+
+    def test_text_template_gives_the_same_file(self):
+        self.start(template=os.path.join(ROOT, 'CHANNEL_TEMPLATE.txt'))
+        self.assertTrue(wait_for(lambda: self.c.status()['rows'] >= 2))
+        self.c.commands.put('STOP')
+        self.assertTrue(wait_for(lambda: self.state() == 'IDLE'))
+        rows = self.rows(self.files()[0])
+        self.assertEqual(rows[0][4:7], ['TPS (%)', 'RPM', 'Battery (V)'])
+        self.assertEqual(rows[1][4:], ['22', '4000', '10.8', '12.81', '13.4', '23.4',
+                                       '156', '128', '39', '35.75', '5.2'])
 
     def test_no_autostart(self):
         self.start(ECU_AUTOSTART=False)
