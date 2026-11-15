@@ -23,9 +23,10 @@ data and vehicle speed in one file.
   and begins logging when the ECU answers. If the ECU drops out mid-session,
   it closes the file and starts a new one when the ECU returns.
 - **Takes its channel list from a template.** `CHANNEL_TEMPLATE.txt` holds the
-  normal channels and their column order as editable text. A log saved by
-  C-Com WP also works as a template: the logger reads the channel names,
-  addresses and scaling from its header.
+  normal channels and their column order as editable text. It is the default.
+  For a dynamic list, set `ECU_CHANNEL_TEMPLATE` to a log saved by C-Com WP:
+  the logger then reads the channel names, addresses and scaling from that
+  log's header at the start of each session.
 
 ## How it talks to the ECU
 

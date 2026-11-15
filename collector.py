@@ -32,8 +32,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PARAMS = [
     # name, type, default, help
     ('ECU_PORT', str, '/dev/ttyUSB0', 'ECU serial device'),
-    ('ECU_CHANNEL_TEMPLATE', str, '/etc/ecu_hub/channels.log',
-     'channel template: a text template or a C-Com log file'),
+    # The default is the fixed channel list in CHANNEL_TEMPLATE.txt, next to this file.
+    # For a dynamic list, name a log file saved by C-Com WP instead: the collector then
+    # takes the channels and their order from that log's header at each session start,
+    # so replacing the log changes what is logged without editing anything else.
+    ('ECU_CHANNEL_TEMPLATE', str, os.path.join(HERE, 'CHANNEL_TEMPLATE.txt'),
+     'channel template: a text template, or a C-Com log file for a dynamic list'),
     ('ECU_POLL_INTERVAL_MS', float, 100, 'time between polls'),
     ('ECU_ECHO_TIMEOUT_MS', float, 50, 'longest wait for the echo of one byte'),
     ('ECU_REPLY_TIMEOUT_MS', float, 60, 'longest wait for a complete reply'),
@@ -60,7 +64,6 @@ PARAMS = [
 MOCK_DEFAULTS = {
     'DATA_DIR': os.path.join(HERE, 'mock_data'),
     'CONTROL_SOCKET': os.path.join(HERE, 'mock_data', 'control.sock'),
-    'ECU_CHANNEL_TEMPLATE': os.path.join(HERE, 'CHANNEL_TEMPLATE.txt'),
 }
 
 

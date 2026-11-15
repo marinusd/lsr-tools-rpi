@@ -295,7 +295,7 @@ Read at start-up from `/etc/ecu_hub/collector.conf`, each with a command-line ov
 | Parameter | Type | Default | Meaning |
 |---|---|---|---|
 | `ECU_PORT` | path | `/dev/ttyUSB0` | ECU serial device. A stable `/dev/serial/by-id/…` path is recommended, since the GPS is also a USB serial device. |
-| `ECU_CHANNEL_TEMPLATE` | path | `/etc/ecu_hub/channels.log` | Channel template for the session: a C-Com log file or a text template such as `CHANNEL_TEMPLATE.txt` (D.2). The collector tells them apart by content, not by file name. |
+| `ECU_CHANNEL_TEMPLATE` | path | `CHANNEL_TEMPLATE.txt` in the collector's own directory | Channel template for the session (D.2). The default is the fixed text template. For a dynamic list, name a C-Com log file instead: the channels then come from that log's header at each session start. The collector tells them apart by content, not by file name. |
 | `ECU_POLL_INTERVAL_MS` | integer | `100` | Time between `FC` polls |
 | `ECU_ECHO_TIMEOUT_MS` | integer | `50` | Longest wait for the echo of one sent byte (observed: about 3 ms) |
 | `ECU_REPLY_TIMEOUT_MS` | integer | `60` | Longest wait for a complete `FC` reply after its echo (observed: about 13 ms for 11 channels). The identity check uses the same limit. |
