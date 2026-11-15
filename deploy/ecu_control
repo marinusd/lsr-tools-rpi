@@ -1,0 +1,3 @@
+# /etc/sudoers.d/ecu_control (spec.md section 5)
+# Lets the web interface restart the collector service, and nothing else.
+ecu-web ALL=(root) NOPASSWD: /usr/bin/systemctl restart ecu-collector.service

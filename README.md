@@ -40,30 +40,44 @@ session; see `PROTOCOL.md` for the commands and `spec.md` for the full design.
 | File | Purpose |
 |---|---|
 | `collector.py` | The logger: ECU polling, GPS, sessions, CSV output, control socket |
+| `server.py` | Web page on port 8080: collector status, New session / Stop buttons, log downloads, plots |
 | `ecuctl.py` | Command-line control: `STATUS`, `NEW_SESSION`, `STOP` |
 | `mock_serial.py` | Simulated ECU and GPS, so everything runs without the car |
 | `ecu_log.py` | Reads C-Com WP `.log` files; writes a text channel template from one |
 | `CHANNEL_TEMPLATE.txt` | The normal channel set and column order (from `ecu_sample.log`) |
 | `tools/decode_capture.py` | Decodes a USB capture of a C-Com WP session |
+| `deploy/` | systemd units, sudo rule, example settings file and `install.sh` for the Pi |
 | `tests/` | Automated tests, run against the simulated ECU |
-
-Planned, not yet built: a web page for downloading logs and starting or
-stopping sessions, server-side plots, and systemd service files.
 
 ## Try it without hardware
 
     python3 collector.py --mock --mock-replay ecu_sample.log
     python3 ecuctl.py STATUS
+    python3 server.py --mock          # then open http://localhost:8080/
 
-Log files appear in `mock_data/`.
+Log files and plots appear in `mock_data/`. The web page needs Flask and
+matplotlib (`pip install flask matplotlib`).
 
 Run the tests with:
 
-    python3 -m unittest tests/test_collector.py
+    python3 -m unittest discover tests
+
+## Install on the Pi
+
+On Raspberry Pi OS Lite (Debian 12), from a copy of this repository:
+
+    sudo sh deploy/install.sh
+
+This installs the Python libraries, copies the program to `/opt/ecu_hub`,
+creates the service accounts, and enables two services that start at boot:
+`ecu-collector` (the logger) and `ecu-web` (the web page on port 8080). Then
+set `ECU_PORT` and `GPS_PORT` in `/etc/ecu_hub/collector.conf` and run
+`sudo systemctl restart ecu-collector`. Logs are written to
+`/var/log/ecu_hub/data/`.
 
 ## Status
 
 Tested against the simulated ECU only. It has not yet been run against a real
-ECU. Some channels (temperatures, MAP, Scaled RPM, fuel flow) are written as
+ECU, and the install script and services have not yet been run on a Pi. Some channels (temperatures, MAP, Scaled RPM, fuel flow) are written as
 raw counts until their conversions are confirmed. `spec.md` section 3.D.7
 lists the checks still to be done on the car.
