@@ -1,8 +1,8 @@
 # F.A.S.T. ECU serial protocol, as seen in C-Com WP real-time logging
 
 Source: `prolific_usb_capture_20261113_101123.pcap` (USB capture of the PL2303 adapter)
-and `fast-data.log` (the log C-Com saved in the same session).
-Reproduce with: `python3 tools/decode_capture.py prolific_usb_capture_20261113_101123.pcap fast-data.log`
+and `capture_run.log` (the log C-Com saved in the same session).
+Reproduce with: `python3 tools/decode_capture.py prolific_usb_capture_20261113_101123.pcap capture_run.log`
 
 Status words: **Verified** = checked against the capture/log. **Inferred** = fits the
 evidence but untested. **Unknown** = needs a test on the car.

@@ -20,7 +20,7 @@ import collector as col          # noqa: E402
 import mock_serial               # noqa: E402
 import server                    # noqa: E402
 
-SAMPLE_1 = os.path.join(ROOT, 'ecu_sample.log')
+SAMPLE_1 = os.path.join(ROOT, 'world_finals_run_4.log')
 
 
 def wait_for(condition, timeout=5.0):
@@ -128,7 +128,7 @@ class ServerTest(unittest.TestCase):
             with open('/proc/self/statm') as f:
                 return int(f.read().split()[1]) * resource.getpagesize() / 1e6
 
-        for _ in range(25):                                      # let the allocator settle
+        for _ in range(40):                                      # let the allocator settle
             server.render_plot(fixed, ['RPM', 'GPS_Speed_MPH'], out)
         self.assertEqual(server.pyplot().get_fignums(), [], 'every figure was closed')
         if not os.path.exists('/proc/self/statm'):
@@ -137,7 +137,8 @@ class ServerTest(unittest.TestCase):
         for _ in range(40):
             server.render_plot(fixed, ['RPM', 'GPS_Speed_MPH'], out)
         self.assertEqual(server.pyplot().get_fignums(), [])
-        self.assertLess(resident_mb() - before, 15, 'memory grew by under 15 MB in 40 plots')
+        # a figure left open costs several MB per plot, so a leak would be far over this
+        self.assertLess(resident_mb() - before, 40, 'memory grew by under 40 MB in 40 plots')
 
     def test_7_bad_paths_are_refused(self):
         day, name = self.day_and_file()

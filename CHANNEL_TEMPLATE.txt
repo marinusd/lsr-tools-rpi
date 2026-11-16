@@ -1,5 +1,5 @@
 # ECU channel template for collector.py (ECU_CHANNEL_TEMPLATE).
-# Extracted from ecu_sample.log.
+# Extracted from world_finals_run_4.log.
 #
 # One line per channel. The order of the lines is the order of the ECU
 # columns in the CSV files. To leave a channel out, delete its line or put

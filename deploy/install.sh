@@ -22,7 +22,7 @@ id ecu-web >/dev/null 2>&1 || useradd --system --gid ecu-hub \
 
 # Program files
 install -d -m 755 "$DEST" /etc/ecu_hub
-for f in collector.py server.py ecu_log.py mock_serial.py ecuctl.py CHANNEL_TEMPLATE.txt spec.md; do
+for f in collector.py server.py parse_ecu_log.py mock_serial.py ecuctl.py CHANNEL_TEMPLATE.txt spec.md; do
     install -m 644 "$SRC/$f" "$DEST/$f"
 done
 if [ ! -e /etc/ecu_hub/collector.conf ]; then

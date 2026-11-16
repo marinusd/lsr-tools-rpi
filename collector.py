@@ -21,7 +21,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
-import ecu_log
+import parse_ecu_log
 
 log = logging.getLogger('collector')
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -218,7 +218,7 @@ def _load_table(path):
             except (ValueError, IndexError):
                 continue                                # heading or blank line
     if len(points) < 2:
-        raise ecu_log.FormatError(f'{path}: needs at least two rows of raw count, value')
+        raise parse_ecu_log.FormatError(f'{path}: needs at least two rows of raw count, value')
     return sorted(points)
 
 
@@ -269,7 +269,7 @@ def make_converters(channels, cfg):
             name += ' [raw]'
             funcs.append(str)
         else:
-            funcs.append(lambda r, v=value, d=ecu_log.decimals(ch.fmt): f'{v(r):.{d}f}')
+            funcs.append(lambda r, v=value, d=parse_ecu_log.decimals(ch.fmt): f'{v(r):.{d}f}')
         seen[name] = seen.get(name, 0) + 1
         if seen[name] > 1:
             name += f' #{seen[name]}'
@@ -527,10 +527,10 @@ class Collector:
                                      self.cfg['ECU_REPLY_TIMEOUT_MS'] / 1000,
                                      self.cfg['ECU_POLL_TABLE_MAX_CHANNELS'])
             template = self.cfg['ECU_CHANNEL_TEMPLATE']
-            channels, note = ecu_log.load_template(template)
+            channels, note = parse_ecu_log.load_template(template)
             if note:
                 log.warning('%s: %s', template, note)
-            order = ecu_log.poll_order(channels)
+            order = parse_ecu_log.poll_order(channels)
             names, funcs = make_converters(channels, self.cfg)
 
             ident = self._link.identity().decode('ascii', 'replace')
@@ -543,7 +543,7 @@ class Collector:
             path, handle = self._new_log_file()
             self._session = Session(path, handle, channels, order, funcs)
             self._session.writer.writerow(GPS_COLUMNS + names)
-        except (EcuError, OSError, ecu_log.FormatError) as e:
+        except (EcuError, OSError, parse_ecu_log.FormatError) as e:
             if isinstance(e, OSError):
                 self._close_port()
             with self._lock:

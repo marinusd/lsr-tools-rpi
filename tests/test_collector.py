@@ -16,19 +16,19 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 import collector as col          # noqa: E402
-import ecu_log                   # noqa: E402
+import parse_ecu_log                   # noqa: E402
 import mock_serial               # noqa: E402
 
-SAMPLE_1 = os.path.join(ROOT, 'ecu_sample.log')
-SAMPLE_2 = os.path.join(ROOT, 'ecu_sample_2.log')
-FAST = os.path.join(ROOT, 'fast-data.log')
+SAMPLE_1 = os.path.join(ROOT, 'world_finals_run_4.log')
+SAMPLE_2 = os.path.join(ROOT, 'dyno_run_2.log')
+FAST = os.path.join(ROOT, 'capture_run.log')
 CAPTURED_TABLE = [0x46, 0x24, 0x28, 0x22, 0x26, 0x83, 0xB5, 0x4A, 0x92, 0x2A, 0x96, 0x00]
 
 
 def load(path):
-    buf = ecu_log.read_bytes(path)
-    hdr = ecu_log.parse_header(buf)
-    return hdr, ecu_log.records(buf, hdr)
+    buf = parse_ecu_log.read_bytes(path)
+    hdr = parse_ecu_log.parse_header(buf)
+    return hdr, parse_ecu_log.records(buf, hdr)
 
 
 class StubGps:
@@ -53,7 +53,7 @@ def wait_for(condition, timeout=5.0):
 class ParserTest(unittest.TestCase):
     """spec.md 3.C.8"""
 
-    def test_fast_data(self):
+    def test_capture_run(self):
         hdr, recs = load(FAST)
         self.assertEqual((len(hdr.channels), hdr.record_size, len(recs)), (11, 26, 175))
         self.assertEqual(recs[-1][0], 17406)
@@ -72,29 +72,29 @@ class ParserTest(unittest.TestCase):
         self.assertEqual([c.name for c in hdr.channels][:3], ['Scaled RPM', 'Coolant(*F)', 'Actual A/F'])
 
     def test_cut_off_file_gives_complete_records_only(self):
-        buf = ecu_log.read_bytes(FAST)[:-10]
-        hdr = ecu_log.parse_header(buf)
-        self.assertEqual(len(ecu_log.records(buf, hdr)), 174)
+        buf = parse_ecu_log.read_bytes(FAST)[:-10]
+        hdr = parse_ecu_log.parse_header(buf)
+        self.assertEqual(len(parse_ecu_log.records(buf, hdr)), 174)
 
 
 class TemplateTest(unittest.TestCase):
     def test_text_template_equals_the_log_it_came_from(self):
         for sample in (SAMPLE_1, SAMPLE_2, FAST):
             hdr, _ = load(sample)
-            again = ecu_log.parse_template_text(ecu_log.template_text(hdr.channels))
+            again = parse_ecu_log.parse_template_text(parse_ecu_log.template_text(hdr.channels))
             self.assertEqual(again, hdr.channels)
 
-    def test_shipped_template_is_ecu_sample(self):
-        channels, note = ecu_log.load_template(os.path.join(ROOT, 'CHANNEL_TEMPLATE.txt'))
+    def test_shipped_template_is_world_finals_run_4(self):
+        channels, note = parse_ecu_log.load_template(os.path.join(ROOT, 'CHANNEL_TEMPLATE.txt'))
         self.assertIsNone(note)
         self.assertEqual(channels, load(SAMPLE_1)[0].channels)
 
     def test_bad_text_template(self):
-        with self.assertRaises(ecu_log.FormatError):
-            ecu_log.parse_template_text('name,unit\nRPM,\n')
-        good = ecu_log.template_text(load(SAMPLE_1)[0].channels)
-        with self.assertRaises(ecu_log.FormatError):
-            ecu_log.parse_template_text(good.replace('0x46', 'zz'))
+        with self.assertRaises(parse_ecu_log.FormatError):
+            parse_ecu_log.parse_template_text('name,unit\nRPM,\n')
+        good = parse_ecu_log.template_text(load(SAMPLE_1)[0].channels)
+        with self.assertRaises(parse_ecu_log.FormatError):
+            parse_ecu_log.parse_template_text(good.replace('0x46', 'zz'))
 
 
 class LinkTest(unittest.TestCase):
@@ -104,7 +104,7 @@ class LinkTest(unittest.TestCase):
         self.ecu = mock_serial.MockEcu(FAST)
         self.link = col.EcuLink(self.ecu, 0.05, 0.06, 11)
         self.hdr, self.recs = load(FAST)
-        self.order = ecu_log.poll_order(self.hdr.channels)
+        self.order = parse_ecu_log.poll_order(self.hdr.channels)
 
     def test_identity(self):
         self.assertEqual(self.link.identity(), b'SEFI8LO')
@@ -117,7 +117,7 @@ class LinkTest(unittest.TestCase):
     def test_poll_reply_is_in_table_order(self):
         self.link.write_poll_table([self.hdr.channels[k].id for k in self.order])
         reply = self.link.poll(11)
-        # first record of fast-data.log, as the ECU sent it on the wire
+        # first record of capture_run.log, as the ECU sent it on the wire
         self.assertEqual(reply.hex(' '), '00 b2 fe 1c 6d 50 00 80 00 f0 ff')
 
     def test_write_guard(self):
@@ -213,7 +213,7 @@ class CollectorTest(unittest.TestCase):
             'TPS (%)', 'RPM', 'Battery (V)', 'Actual A/F', 'Target A/F', 'O2 Corr. (%)',
             'MAP (PSIA) [raw]', 'Air Temp(*F) [raw]', 'Coolant(*F) [raw]', 'Spark(*BTDC)',
             'Inj. DC (%)'])
-        # first record of ecu_sample.log (spec 3.C.3), in each channel's own format
+        # first record of world_finals_run_4.log (spec 3.C.3), in each channel's own format
         self.assertEqual(rows[1][4:], ['22', '4000', '10.8', '12.81', '13.4', '23.4',
                                        '156', '128', '39', '35.75', '5.2'])
         self.assertEqual(rows[1][:4], StubGps().row_fields())

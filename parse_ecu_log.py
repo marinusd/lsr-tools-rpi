@@ -7,8 +7,8 @@ The mock ECU also uses the records, to replay them.
 A channel template can also be a text file (see TEMPLATE_COLUMNS below), which
 is easier to read and to edit than the header of a binary log.
 
-usage: ecu_log.py FILE                    print a summary of a log file
-       ecu_log.py FILE --template OUT     write its channel table as a text template
+usage: parse_ecu_log.py FILE                    print a summary of a log file
+       parse_ecu_log.py FILE --template OUT     write its channel table as a text template
 """
 import csv
 import io

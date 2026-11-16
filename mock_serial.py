@@ -10,7 +10,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
-import ecu_log
+import parse_ecu_log
 
 POLL_TABLE_BASE = 0x00B6
 COMMAND_LENGTH = {0xFC: 1, 0xFD: 5, 0xFE: 4, 0xFF: 3}
@@ -40,9 +40,9 @@ class MockEcu:
         self._replay = None
         self._started = time.monotonic()
         if replay_path:
-            buf = ecu_log.read_bytes(replay_path)
-            hdr = ecu_log.parse_header(buf)
-            recs = ecu_log.records(buf, hdr)
+            buf = parse_ecu_log.read_bytes(replay_path)
+            hdr = parse_ecu_log.parse_header(buf)
+            recs = parse_ecu_log.records(buf, hdr)
             if not recs:
                 raise ValueError(f'{replay_path} has no records to replay')
             ids = [c.id for c in hdr.channels]

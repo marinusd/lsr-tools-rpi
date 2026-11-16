@@ -53,13 +53,13 @@ Each logging session (Section 3.D) produces exactly **one CSV file**. Files are 
   * **Duplicate names:** if two channels in one template have the same name, the second becomes `<name> #2`, the third `<name> #3`, and so on.
   * **Number format:** converted values use the decimal places of the channel's printf format (e.g. `%5.2f` → 2 decimals), with no padding. Raw counts are written as integers.
   * **Matching channels:** code that needs a particular channel (plots, conversions) must find it by **name** or by the template's channel index (3.C.2), never by column position or by channel ID. Channel IDs are not unique (3.C.3).
-  * Examples: `ecu_sample.log` gives 11 ECU columns starting `TPS (%), RPM, Battery (V), …`; `ecu_sample_2.log` gives 13 starting `Scaled RPM, Coolant(*F) [raw], Actual A/F, …`.
+  * Examples: `world_finals_run_4.log` gives 11 ECU columns starting `TPS (%), RPM, Battery (V), …`; `dyno_run_2.log` gives 13 starting `Scaled RPM, Coolant(*F) [raw], Actual A/F, …`.
 
-### C. ECU Log File Format (derived from `ecu_sample.log` and `ecu_sample_2.log`)
+### C. ECU Log File Format (derived from `world_finals_run_4.log` and `dyno_run_2.log`)
 
-This section documents the binary layout of `ecu_sample.log`, a log saved by the F.A.S.T. ECU software. It was reverse-engineered from two samples: `ecu_sample.log` (11 channels, 3,146 records, collected at a density altitude of about 6,000 ft) and `ecu_sample_2.log` (13 channels in a different order, 634 records, collected at a density altitude of about 150 ft and 75 °F). Every offset below was verified against both. Items marked **[TBD]** are not yet confirmed.
+This section documents the binary layout of `world_finals_run_4.log`, a log saved by the F.A.S.T. ECU software. It was reverse-engineered from two samples: `world_finals_run_4.log` (11 channels, 3,146 records, collected at a density altitude of about 6,000 ft) and `dyno_run_2.log` (13 channels in a different order, 634 records, collected at a density altitude of about 150 ft and 75 °F). Every offset below was verified against both. Items marked **[TBD]** are not yet confirmed.
 
-> **Role of this format (from the serial capture of 2026-11-13, see `PROTOCOL.md`):** this is the file that the **PC software (C-Com WP)** writes. The ECU never sends any of it: not the header, not the channel table, not the millisecond timestamps. The PC builds the header from its own dashboard configuration and fills each record from one poll reply (3.D). The Pi uses this format for two things only: (1) as the **channel template**, the source of the channel list, RAM addresses, scaling and display formats for a session (3.D.2), and (2) as test data for the mock ECU. A third sample, `fast-data.log` (11 channels, 175 records, engine off), was saved during the captured session and matches the capture record for record.
+> **Role of this format (from the serial capture of 2026-11-13, see `PROTOCOL.md`):** this is the file that the **PC software (C-Com WP)** writes. The ECU never sends any of it: not the header, not the channel table, not the millisecond timestamps. The PC builds the header from its own dashboard configuration and fills each record from one poll reply (3.D). The Pi uses this format for two things only: (1) as the **channel template**, the source of the channel list, RAM addresses, scaling and display formats for a session (3.D.2), and (2) as test data for the mock ECU. A third sample, `capture_run.log` (11 channels, 175 records, engine off), was saved during the captured session and matches the capture record for record.
 
 > **Note:** No ECU frame-marker or sync sequence exists in this format. The bytes `AA 45 E0` cited in earlier drafts are not a marker: they are the low bytes of four 16-bit header values (15, 170, 325, 480) at offset 132. Parsers must not search for them.
 
@@ -100,7 +100,7 @@ This section documents the binary layout of `ecu_sample.log`, a log saved by the
 
 Python: `struct.unpack_from('<16s10sHHffHHff8s', buf, 516 + 58*i)`
 
-Channel table in `ecu_sample.log` (the last column is the first record decoded as `raw × scale + offset`):
+Channel table in `world_finals_run_4.log` (the last column is the first record decoded as `raw × scale + offset`):
 
 | # | Name | Unit | ID | Conv | Scale | Offset | Display range | Format | Record 0 |
 |---|---|---|---|---|---|---|---|---|---|
@@ -116,7 +116,7 @@ Channel table in `ecu_sample.log` (the last column is the first record decoded a
 | 9 | `Spark(*BTDC)` | | 0x83 | 0 | 0.25 | 0 | 0 to 100 | `%5.2f` | 143 → 35.75° |
 | 10 | `Inj. DC (%)` | | 0xB5 | 4 | 0.128 | 0 | 0 to 100 | `%5.1f` | 41 → 5.2 % |
 
-Channel table in `ecu_sample_2.log`: the same definitions in a different order, plus two new channels:
+Channel table in `dyno_run_2.log`: the same definitions in a different order, plus two new channels:
 
 | # | Name | ID | Conv | Scale | Display range | Record 0 raw |
 |---|---|---|---|---|---|---|
@@ -193,7 +193,7 @@ Sample properties:
 
 While a parameter is unset, the collector writes the **raw count** for that channel and flags it in the CSV header (for example `Coolant(*F) [raw]`, see 3.B). It must never write an invented approximation.
 
-**Quickest way to confirm these conversions:** open `ecu_sample_2.log` in the F.A.S.T. PC software and note the displayed MAP, Coolant, Air Temp, Scaled RPM and Fuel #s/hr at a few points, for example t = 0 s, 30 s and 60 s (raw MAP 203 / 238 / 245, Coolant 74 / 66 / 56). Each pair of displayed and raw values is one calibration point.
+**Quickest way to confirm these conversions:** open `dyno_run_2.log` in the F.A.S.T. PC software and note the displayed MAP, Coolant, Air Temp, Scaled RPM and Fuel #s/hr at a few points, for example t = 0 s, 30 s and 60 s (raw MAP 203 / 238 / 245, Coolant 74 / 66 / 56). Each pair of displayed and raw values is one calibration point.
 
 #### C.7 Relationship to the live serial link
 The capture settled the open questions of earlier drafts:
@@ -203,13 +203,13 @@ The capture settled the open questions of earlier drafts:
 * **Timing:** the 100 ms average and the 78–125 ms jitter in the samples are the PC's poll timer, not an ECU property.
 
 #### C.8 Acceptance check for the parser
-A reference parser, given `fast-data.log`, must report 11 channels in the same order as `ecu_sample.log`, a record size of 26, 175 records, and a last timestamp of 17,406 ms. Given `ecu_sample_2.log`, it must report 13 channels in the order of the second table in C.3, a record size of 30, 634 records, and a last timestamp of 63,296 ms. Given `ecu_sample.log`, it must report: 11 channels with the names in C.3, a record size of 26, 3,146 records, first timestamp 0 ms, last timestamp 314,500 ms, and a first record of TPS 21.6 %, RPM 4000, Battery 10.8 V, Actual A/F 12.81, Target A/F 13.38, O2 Corr. 23.4 %, Spark 35.75°, Inj. DC 5.2 %.
+A reference parser, given `capture_run.log`, must report 11 channels in the same order as `world_finals_run_4.log`, a record size of 26, 175 records, and a last timestamp of 17,406 ms. Given `dyno_run_2.log`, it must report 13 channels in the order of the second table in C.3, a record size of 30, 634 records, and a last timestamp of 63,296 ms. Given `world_finals_run_4.log`, it must report: 11 channels with the names in C.3, a record size of 26, 3,146 records, first timestamp 0 ms, last timestamp 314,500 ms, and a first record of TPS 21.6 %, RPM 4000, Battery 10.8 V, Actual A/F 12.81, Target A/F 13.38, O2 Corr. 23.4 %, Spark 35.75°, Inj. DC 5.2 %.
 
 ### D. Polling the ECU (derived from the serial capture; details in `PROTOCOL.md`)
 
 The ECU does not stream data and has no ARM or TRIGGER command. It is a polled memory-access device: the collector writes a list of RAM addresses (the **poll table**) into the ECU, then asks for the values at those addresses every 100 ms. Earlier drafts' "ARM" and "TRIGGER" were actions inside the PC software: the capture shows the poll table being written and polling starting, and 5.6 s later the PC starting to keep the replies, with no change on the wire.
 
-Each statement below is marked **Verified** (seen in the capture and checked against `fast-data.log`), or **[TBD]** (not yet tested on the car; see D.7).
+Each statement below is marked **Verified** (seen in the capture and checked against `capture_run.log`), or **[TBD]** (not yet tested on the car; see D.7).
 
 #### D.1 Link and byte handling
 * **Port settings:** 9600 bps, 8N1, no flow control, DTR asserted, RTS de-asserted. (DTR/RTS: Verified. 9600 and 10-bit frames: derived from timing, 206 bytes in 213 ms; the capture does not contain the line-coding request.) The adapter is a Prolific PL2303 (USB 067b:2303), handled by the Linux `pl2303` driver.
@@ -235,7 +235,7 @@ All four are Verified (13 block reads, 12 writes, 228 polls, every checksum corr
 * **Poll reply:** `FC` returns *N* value bytes in table order and one checksum byte, about 13 ms after the echo for 11 channels (Verified). The collector reads exactly *N* + 1 bytes within `ECU_REPLY_TIMEOUT_MS` and checks the checksum.
 * **Captured example (11 channels):** table `46 24 28 22 26 83 B5 4A 92 2A 96 00` at `0x00B6`–`0x00C1` (RPM, Coolant, Air Temp, TPS, Battery, Spark, Inj. DC, O2 Corr., Target A/F, MAP, Actual A/F); reply `00 B2 FE 1C 6C 50 00 80 00 F0 FF F7`.
 * **Channel template:** the channels of a session come from the header of a C-Com log file (3.C) named by `ECU_CHANNEL_TEMPLATE`. To change the logged channels, the operator sets up the dashboard in the PC software, saves a short log, and copies that file to the Pi. Only the header is used. The collector reads the template at the start of every session.
-* **Text template:** `ECU_CHANNEL_TEMPLATE` may instead name a text file holding the same channel table, one channel per line, with the columns `name, unit, index, id, conv, scale, offset, display_min, display_max, format`. Lines starting with `#` are comments. The order of the lines is the order of the ECU columns in the CSV; the poll table is still written in ascending `index` order. `python3 ecu_log.py LOGFILE --template OUT.txt` writes such a file from a C-Com log. The repository's `CHANNEL_TEMPLATE.txt`, extracted from `ecu_sample.log` (11 channels starting `TPS (%), RPM, Battery (V)`), is the normal channel set and order.
+* **Text template:** `ECU_CHANNEL_TEMPLATE` may instead name a text file holding the same channel table, one channel per line, with the columns `name, unit, index, id, conv, scale, offset, display_min, display_max, format`. Lines starting with `#` are comments. The order of the lines is the order of the ECU columns in the CSV; the poll table is still written in ascending `index` order. `python3 parse_ecu_log.py LOGFILE --template OUT.txt` writes such a file from a C-Com log. The repository's `CHANNEL_TEMPLATE.txt`, extracted from `world_finals_run_4.log` (11 channels starting `TPS (%), RPM, Battery (V)`), is the normal channel set and order.
 * **Write guard (safety):** `FE` changes ECU memory. The collector must refuse to send any `FE` whose address is outside `0x00B6` … `0x00B6 + ECU_POLL_TABLE_MAX_CHANNELS`, and must have no other code path that sends `FE`. Only `0x00B6`–`0x00C1` (11 channels and the end marker) were seen being written, so `ECU_POLL_TABLE_MAX_CHANNELS` defaults to **11**. A template with more channels is refused with a clear error until a capture confirms a longer table (D.7).
 * **What the PC does that the collector does not:** on connecting, the PC reads the 2 KB calibration (`0x7800`–`0x7FFF`) and three small values (`FF 00 54`, `FF 7F FF`, `FD 7F FD 7F FF`). None of the logging traffic depends on them. That they can be skipped is **[TBD]** until tried from a cold ECU.
 
@@ -314,7 +314,7 @@ The command bytes (`FC`, `FD`, `FE`) and the poll-table base address `0x00B6` ar
 2. With the ECU switched off, a sent byte is or is not echoed (cable echo or ECU echo).
 3. Whether the ECU accepts bytes sent without waiting for each echo.
 4. A capture with the engine running, to confirm the values change as expected.
-5. A capture with the 13-channel dashboard of `ecu_sample_2.log`, to confirm the poll table extends to `0x00C3`; then raise `ECU_POLL_TABLE_MAX_CHANNELS`.
+5. A capture with the 13-channel dashboard of `dyno_run_2.log`, to confirm the poll table extends to `0x00C3`; then raise `ECU_POLL_TABLE_MAX_CHANNELS`.
 6. Whether the poll table survives an ECU power cycle, and whether its order matters.
 
 ---
@@ -350,7 +350,7 @@ The command bytes (`FC`, `FD`, `FE`) and the poll-table base address `0x00B6` ar
 * Emulates both hardware serial interfaces simultaneously using internal background simulator loops.
 * Feeds realistic, moving metrics strings:
   * Telemetry cycles stepping RPM through normal rev bands.
-  * A replay option that answers each poll with the next record of `ecu_sample.log`, `ecu_sample_2.log` or `fast-data.log`, so both channel layouts (11 and 13 channels, different orders) can be tested. For the 13-channel sample, the test sets `ECU_POLL_TABLE_MAX_CHANNELS = 13`.
+  * A replay option that answers each poll with the next record of `world_finals_run_4.log`, `dyno_run_2.log` or `capture_run.log`, so both channel layouts (11 and 13 channels, different orders) can be tested. For the 13-channel sample, the test sets `ECU_POLL_TABLE_MAX_CHANNELS = 13`.
   * A mock ECU that speaks the protocol of 3.D: it echoes every byte, answers the identity read, stores `FE` writes in a mock RAM, and answers `FC` with the values for the addresses in its poll table (in table order, with checksum). Switches make it stay silent, stop echoing, corrupt a checksum, or drop out mid-session, to test the failure handling in 3.D.3 and 3.D.5. It records every `FE` address it receives so a test can check the write guard.
   * Spatial route generation loop modifying latitude and longitude over an imaginary driving path, calculating step velocities to cleanly mock logical non-zero `GPS_Speed_MPH` data fields.
 
@@ -383,7 +383,7 @@ Deployment details (files in `deploy/`, installed by `deploy/install.sh` to `/op
 ## 7. Acceptance Validation Criteria
 
 An execution workflow is valid only when matching these specific checks:
-1. Executing `python collector.py --mock` accurately instantiates simultaneous generation tasks, producing merged CSV logs whose columns are the four GPS columns followed by the ECU channels in the order of the session's channel template (3.B). Replaying `ecu_sample.log` and then `ecu_sample_2.log` produces two files with 11 and 13 ECU columns respectively, each in its own template's order, although the mock ECU returns the values in poll-table order.
+1. Executing `python collector.py --mock` accurately instantiates simultaneous generation tasks, producing merged CSV logs whose columns are the four GPS columns followed by the ECU channels in the order of the session's channel template (3.B). Replaying `world_finals_run_4.log` and then `dyno_run_2.log` produces two files with 11 and 13 ECU columns respectively, each in its own template's order, although the mock ECU returns the values in poll-table order.
 2. Each session produces exactly one file, `data/YYYY-MM-DD/log_HHMM.csv`, named from the session start time. A session that runs past the top of the hour or past midnight stays in that one file. Two sessions started in the same minute produce `log_HHMM.csv` and `log_HHMM_2.csv`.
 3. Graph layout requests processing `GPS_Speed_MPH` vs engine factors render smoothly, verifying that active memory usage traces stay flat over sequential rendering checks.
 4. In mock mode, `NEW_SESSION` makes the collector run the identity check, write the poll table (ascending channel index, `00` at the end) and start polling, and a new file is created. `STOP` ends the polling and closes the file, and nothing more is sent to the mock ECU. A poll reply with a wrong checksum produces no row and does not end the session. The collector sends no `FE` outside the poll-table range, and refuses a template with more channels than `ECU_POLL_TABLE_MAX_CHANNELS`.

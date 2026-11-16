@@ -43,15 +43,15 @@ session; see `PROTOCOL.md` for the commands and `spec.md` for the full design.
 | `server.py` | Web page on port 8080: collector status, New session / Stop buttons, log downloads, plots |
 | `ecuctl.py` | Command-line control: `STATUS`, `NEW_SESSION`, `STOP` |
 | `mock_serial.py` | Simulated ECU and GPS, so everything runs without the car |
-| `ecu_log.py` | Reads C-Com WP `.log` files; writes a text channel template from one |
-| `CHANNEL_TEMPLATE.txt` | The normal channel set and column order (from `ecu_sample.log`) |
+| `parse_ecu_log.py` | Reads C-Com WP `.log` files; writes a text channel template from one |
+| `CHANNEL_TEMPLATE.txt` | The normal channel set and column order (from `world_finals_run_4.log`) |
 | `tools/decode_capture.py` | Decodes a USB capture of a C-Com WP session |
 | `deploy/` | systemd units, sudo rule, example settings file and `install.sh` for the Pi |
 | `tests/` | Automated tests, run against the simulated ECU |
 
 ## Try it without hardware
 
-    python3 collector.py --mock --mock-replay ecu_sample.log
+    python3 collector.py --mock --mock-replay world_finals_run_4.log
     python3 ecuctl.py STATUS
     python3 server.py --mock          # then open http://localhost:8080/
 
