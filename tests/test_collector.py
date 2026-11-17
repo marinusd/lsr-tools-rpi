@@ -19,9 +19,10 @@ import collector as col          # noqa: E402
 import parse_ecu_log                   # noqa: E402
 import mock_serial               # noqa: E402
 
-SAMPLE_1 = os.path.join(ROOT, 'world_finals_run_4.log')
-SAMPLE_2 = os.path.join(ROOT, 'dyno_run_2.log')
-FAST = os.path.join(ROOT, 'capture_run.log')
+LOGS = os.path.join(ROOT, 'C-ComWP-logs')
+SAMPLE_1 = os.path.join(LOGS, 'world_finals_run_4.log')
+SAMPLE_2 = os.path.join(LOGS, 'dyno_run_2.log')
+FAST = os.path.join(LOGS, 'capture_run.log')
 CAPTURED_TABLE = [0x46, 0x24, 0x28, 0x22, 0x26, 0x83, 0xB5, 0x4A, 0x92, 0x2A, 0x96, 0x00]
 
 

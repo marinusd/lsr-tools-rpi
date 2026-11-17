@@ -224,3 +224,6 @@ __marimo__/
 
 # collector.py --mock output
 mock_data/
+
+# C-Com WP sample logs are part of the repository (the *.log rule above would hide them)
+!C-ComWP-logs/*.log

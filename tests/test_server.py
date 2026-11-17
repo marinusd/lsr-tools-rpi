@@ -20,7 +20,7 @@ import collector as col          # noqa: E402
 import mock_serial               # noqa: E402
 import server                    # noqa: E402
 
-SAMPLE_1 = os.path.join(ROOT, 'world_finals_run_4.log')
+SAMPLE_1 = os.path.join(ROOT, 'C-ComWP-logs', 'world_finals_run_4.log')
 
 
 def wait_for(condition, timeout=5.0):

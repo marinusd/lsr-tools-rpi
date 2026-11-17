@@ -59,6 +59,8 @@ Each logging session (Section 3.D) produces exactly **one CSV file**. Files are 
 
 This section documents the binary layout of `world_finals_run_4.log`, a log saved by the F.A.S.T. ECU software. It was reverse-engineered from two samples: `world_finals_run_4.log` (11 channels, 3,146 records, collected at a density altitude of about 6,000 ft) and `dyno_run_2.log` (13 channels in a different order, 634 records, collected at a density altitude of about 150 ft and 75 °F). Every offset below was verified against both. Items marked **[TBD]** are not yet confirmed.
 
+> **Where the samples are:** the three C-Com WP logs named in this specification (`world_finals_run_4.log`, `dyno_run_2.log` and `capture_run.log`) are in the repository's `C-ComWP-logs/` directory.
+
 > **Role of this format (from the serial capture of 2026-11-13, see `PROTOCOL.md`):** this is the file that the **PC software (C-Com WP)** writes. The ECU never sends any of it: not the header, not the channel table, not the millisecond timestamps. The PC builds the header from its own dashboard configuration and fills each record from one poll reply (3.D). The Pi uses this format for two things only: (1) as the **channel template**, the source of the channel list, RAM addresses, scaling and display formats for a session (3.D.2), and (2) as test data for the mock ECU. A third sample, `capture_run.log` (11 channels, 175 records, engine off), was saved during the captured session and matches the capture record for record.
 
 > **Note:** No ECU frame-marker or sync sequence exists in this format. The bytes `AA 45 E0` cited in earlier drafts are not a marker: they are the low bytes of four 16-bit header values (15, 170, 325, 480) at offset 132. Parsers must not search for them.
