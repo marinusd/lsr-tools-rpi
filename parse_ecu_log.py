@@ -2,16 +2,20 @@
 """Parser for the log file format written by the F.A.S.T. PC software (spec.md 3.C).
 
 The collector uses only the header of such a file, as its channel template.
-The mock ECU also uses the records, to replay them.
+The mock ECU also uses the records, to replay them. header_bytes() and
+record_bytes() write the format (see "writing" below).
 
 A channel template can also be a text file (see TEMPLATE_COLUMNS below), which
 is easier to read and to edit than the header of a binary log.
 
 usage: parse_ecu_log.py FILE                    print a summary of a log file
        parse_ecu_log.py FILE --template OUT     write its channel table as a text template
+       parse_ecu_log.py FILE --repair           set the record count to the records in
+                                                the file (after a power cut)
 """
 import csv
 import io
+import os
 from decimal import Decimal
 import re
 import struct
@@ -22,8 +26,12 @@ CHANNEL_TABLE_OFFSET = 516
 CHANNEL_SIZE = 58
 DATA_HEADER_SIZE = 18
 
+# flag: a u16 at offset 24 of each channel entry. Its meaning is unknown; in every
+# sample it is 1, except for Coolant(*F) where it is 0. It is kept so that a log
+# written by header_bytes() matches what the PC software writes.
 Channel = namedtuple('Channel', 'name unit id conv scale offset raw_min raw_max '
-                                'disp_max disp_min fmt index')
+                                'disp_max disp_min fmt index flag')
+CHANNEL_STRUCT = '<16s8sHHHffHHff8s'     # name unit flag id conv scale offset ...
 Header = namedtuple('Header', 'channels record_size record_count data_start')
 
 
@@ -48,9 +56,9 @@ def parse_header(buf, need_data_header=True):
     index = struct.unpack_from(f'<{n}H', buf, 4)
     channels = []
     for i in range(n):
-        f = struct.unpack_from('<16s10sHHffHHff8s', buf,
-                               CHANNEL_TABLE_OFFSET + CHANNEL_SIZE * i)
-        channels.append(Channel(_text(f[0]), _text(f[1]), *f[2:10], _text(f[10]), index[i]))
+        f = struct.unpack_from(CHANNEL_STRUCT, buf, CHANNEL_TABLE_OFFSET + CHANNEL_SIZE * i)
+        channels.append(Channel(_text(f[0]), _text(f[1]), *f[3:11], _text(f[11]), index[i],
+                                f[2]))
     record_size, record_count = 4 + 2 * n, 0
     if len(buf) >= table_end + DATA_HEADER_SIZE:
         record_size, _, record_count = struct.unpack_from('<HHI', buf, table_end)
@@ -85,9 +93,110 @@ def read_bytes(path):
         return f.read()
 
 
+# ---- writing ------------------------------------------------------------------
+LAYOUT_OFFSET = 132
+COUNT_OFFSET_IN_DATA_HEADER = 4
+
+
+def _layout_block():
+    """Bytes 132-515: display settings of the PC software. Identical in every sample."""
+    block = bytearray(CHANNEL_TABLE_OFFSET - LAYOUT_OFFSET)
+    struct.pack_into('<8H', block, 0, 15, 170, 325, 480, 15, 170, 325, 480)
+    struct.pack_into('<8f', block, 260 - LAYOUT_OFFSET, *([420.0] * 4 + [440.0] * 4))
+    return bytes(block)
+
+
+LAYOUT_BLOCK = _layout_block()
+
+
+def _field(text, size, what, channel):
+    raw = text.encode('ascii')
+    if len(raw) > size:
+        raise FormatError(f'{channel}: {what} "{text}" is longer than {size} characters')
+    return raw
+
+
+def header_bytes(channels, record_count=0):
+    """Everything up to the first record, as the PC software writes it."""
+    n = len(channels)
+    if not 1 <= n <= 64:
+        raise FormatError(f'{n} channels; need between 1 and 64')
+    out = bytearray(b'22' + struct.pack(f'<H{n}H', n, *(c.index for c in channels)))
+    out += bytes(LAYOUT_OFFSET - len(out))
+    out += LAYOUT_BLOCK
+    for c in channels:
+        out += struct.pack(CHANNEL_STRUCT, _field(c.name, 16, 'name', c.name),
+                           _field(c.unit, 8, 'unit', c.name), c.flag, c.id, c.conv, c.scale,
+                           c.offset, c.raw_min, c.raw_max, c.disp_max, c.disp_min,
+                           _field(c.fmt, 8, 'format', c.name))
+    out += struct.pack('<HHIHHHHH', 4 + 2 * n, 0, record_count, 8, 0, 650, 600, 1)
+    return bytes(out)
+
+
+def count_offset(channel_count):
+    """File offset of the u32 record count, for updating it as records are added."""
+    return (CHANNEL_TABLE_OFFSET + CHANNEL_SIZE * channel_count
+            + COUNT_OFFSET_IN_DATA_HEADER)
+
+
+def record_bytes(ms, raws):
+    """One record: elapsed ms, then one raw value per channel in channel-table order."""
+    return struct.pack(f'<I{len(raws)}H', ms, *raws)
+
+
+class LogWriter:
+    """Writes a log in the PC software's format, one record at a time.
+
+    The PC software trusts the record count in the header and shows no records
+    past it (tested 2026-11-17: a count of 0 shows no data). sync() therefore
+    writes the records to disk first and then updates the count, so after a
+    power cut the count is never ahead of the records, and at most the records
+    since the last sync() are hidden. repair() makes those visible again.
+    """
+
+    def __init__(self, path, channels):
+        self.path = path
+        self.count = 0
+        self._counted = 0
+        self._count_offset = count_offset(len(channels))
+        header = header_bytes(channels, 0)                 # checks the fields first
+        self._file = open(path, 'xb')
+        self._file.write(header)
+
+    def add(self, ms, raws):
+        self._file.write(record_bytes(ms, raws))
+        self.count += 1
+
+    def sync(self):
+        self._file.flush()
+        os.fsync(self._file.fileno())
+        if self.count != self._counted:
+            os.pwrite(self._file.fileno(), struct.pack('<I', self.count), self._count_offset)
+            os.fsync(self._file.fileno())
+            self._counted = self.count
+
+    def close(self):
+        try:
+            self.sync()
+        finally:
+            self._file.close()
+
+
+def repair(path):
+    """Set the record count to the number of complete records. Returns (old, new)."""
+    buf = read_bytes(path)
+    hdr = parse_header(buf)
+    complete = max(0, len(buf) - hdr.data_start) // hdr.record_size
+    if complete != hdr.record_count:
+        with open(path, 'r+b') as f:
+            f.seek(count_offset(len(hdr.channels)))
+            f.write(struct.pack('<I', complete))
+    return hdr.record_count, complete
+
+
 # ---- text channel template ---------------------------------------------------
 TEMPLATE_COLUMNS = ['name', 'unit', 'index', 'id', 'conv', 'scale', 'offset',
-                    'display_min', 'display_max', 'format']
+                    'display_min', 'display_max', 'format', 'flag']
 
 
 def _f32_text(value):
@@ -126,14 +235,15 @@ def template_text(channels, source=''):
               '#   conv          conversion code (spec.md 3.C.6)\n'
               '#   scale, offset value = raw x scale + offset, for conv 0, 4 and 5\n'
               '#   display_min, display_max, format   range and printf format for display\n'
+              '#   flag          copied from the PC software\'s log; meaning unknown\n'
               '#\n'
-              '# Do not change index, id, conv, scale or offset: they describe the ECU.\n')
+              '# Do not change index, id, conv, scale, offset or flag.\n')
     writer = csv.writer(out, lineterminator='\n')
     writer.writerow(TEMPLATE_COLUMNS)
     for c in channels:
         writer.writerow([c.name, c.unit, c.index, f'0x{c.id:02X}', c.conv, _f32_text(c.scale),
                          _f32_text(c.offset), _f32_text(c.disp_min), _f32_text(c.disp_max),
-                         c.fmt])
+                         c.fmt, c.flag])
     return out.getvalue()
 
 
@@ -151,7 +261,7 @@ def parse_template_text(text):
         try:
             channels.append(Channel(r[0], r[1], int(r[3], 0), int(r[4]), _f32(r[5]),
                                     _f32(r[6]), 0, 255, _f32(r[8]), _f32(r[7]), r[9],
-                                    int(r[2])))
+                                    int(r[2]), int(r[10])))
         except ValueError as e:
             raise FormatError(f'channel line {number} ({r[0]}): {e}')
     if not 1 <= len(channels) <= 64:
@@ -181,6 +291,11 @@ def poll_order(channels):
 
 
 def main():
+    if sys.argv[2:3] == ['--repair']:
+        old, new = repair(sys.argv[1])
+        print(f'{sys.argv[1]}: record count {old} -> {new}' if old != new else
+              f'{sys.argv[1]}: record count {old} is already right')
+        return
     buf = read_bytes(sys.argv[1])
     hdr = parse_header(buf)
     if sys.argv[2:3] == ['--template']:

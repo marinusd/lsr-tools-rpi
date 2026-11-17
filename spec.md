@@ -21,12 +21,14 @@ The objective is to build a low-overhead, memory-optimized telemetry application
 ## 3. Architecture & Binary Mapping Layout
 
 ### A. Directory & Folder Hierarchy
-Each logging session (Section 3.D) produces exactly **one CSV file**. Files are grouped into one directory per day:
+Each logging session (Section 3.D) produces exactly **one CSV file**, and, unless `WRITE_NATIVE_LOG` is off, **one C-Com WP log** of the same session with the same name stem (3.C.9). Files are grouped into one directory per day:
 ```text
 /var/log/ecu_hub/data/
 └── YYYY-MM-DD/
     ├── log_HHMM.csv
+    ├── log_HHMM.log                 (the same session in C-Com WP's format, no GPS)
     ├── log_HHMM_2.csv               (second session started in the same minute)
+    ├── log_HHMM_2.log
     └── plot_HHMM_[Metrics].png
 ```
 * **Session start time:** `YYYY-MM-DD` and `HHMM` are the date and the hour/minute at which the session started, that is, when the first valid poll reply of the session arrived (3.D.3). They come from the system clock after it has been set from GPS (Section 4, Tier 1).
@@ -77,7 +79,7 @@ This section documents the binary layout of `world_finals_run_4.log`, a log save
 | 0 | 2 | Format/version tag: ASCII `"22"` (`0x32 0x32`). The same in both samples; the parser should log a warning if it is different. |
 | 2 | 2 | `u16` channel count *N* (sample: **11**) |
 | 4 | 2 × *N* | **Channel index array:** one `u16` per channel, in channel-table order. It appears to identify the channel in the ECU software's list of loggable values. C-Com writes the ECU's poll table in ascending order of this value (3.D.2; verified in the capture). It is consistent across all samples: RPM = 0, Coolant = 2, Air Temp = 3, TPS = 4, Battery = 5, Spark = 10, Inj. DC = 12, Scaled RPM = 15, O2 Corr. = 24, Target A/F = 27, MAP = 30, Actual A/F = 45, Fuel #s/hr = 52. The space runs to offset 132, which would allow up to 64 channels **[TBD]**. |
-| 4 + 2*N* to 516 | — | Display/layout settings for the ECU software, identical in both samples (e.g. `u16` 15, 170, 325, 480 at 132; `f32` 420.0 ×4 and 440.0 ×4 at 262). Ignored by the collector. |
+| 4 + 2*N* to 516 | — | Display/layout settings for the ECU software, identical in all three samples: zeros up to 132, then `u16` 15, 170, 325, 480 twice at 132 and `f32` 420.0 ×4 and 440.0 ×4 at 260, zeros elsewhere. Ignored when reading; written as this constant. |
 | 516 | 58 × *N* | Channel definition table (C.3) |
 | 516 + 58*N* | 18 | Data block header (C.4) — at offset 1154 in the sample |
 | 534 + 58*N* | record size × count | Data records (C.5) — from offset 1172 in the sample |
@@ -89,7 +91,8 @@ This section documents the binary layout of `world_finals_run_4.log`, a log save
 | Rel. offset | Type | Field |
 |---|---|---|
 | 0 | `char[16]` | Channel name |
-| 16 | `char[10]` | Unit label (often empty) |
+| 16 | `char[8]` | Unit label (often empty) |
+| 24 | `u16` | Unknown flag. 1 for every channel in all three samples, except `Coolant(*F)`, where it is 0. Kept, not interpreted. (Earlier drafts counted these bytes as part of a 10-character unit label.) |
 | 26 | `u16` | Channel ID: the 8-bit ECU RAM address the value is read from. It is the byte written into the ECU's poll table (3.D.2; verified in the capture). **Not unique:** `Inj. DC (%)` and `Fuel #s/hr` both use 0xB5 and carry identical raw values. Do not use it to identify a channel. |
 | 28 | `u16` | Conversion code (C.6) |
 | 30 | `f32` | Scale |
@@ -100,7 +103,7 @@ This section documents the binary layout of `world_finals_run_4.log`, a log save
 | 46 | `f32` | Display minimum |
 | 50 | `char[8]` | printf-style display format (e.g. `%5.1f`) |
 
-Python: `struct.unpack_from('<16s10sHHffHHff8s', buf, 516 + 58*i)`
+Python: `struct.unpack_from('<16s8sHHHffHHff8s', buf, 516 + 58*i)`
 
 Channel table in `world_finals_run_4.log` (the last column is the first record decoded as `raw × scale + offset`):
 
@@ -202,6 +205,14 @@ The capture settled the open questions of earlier drafts:
 * **There is no live stream and no live header.** The ECU only answers commands. A record in this file is one reply to the `FC` poll command (3.D.2), re-ordered into channel-table order and widened to `u16`, with a PC timestamp in front.
 * **Reply order is not record order.** The ECU returns values in poll-table order (ascending channel index, C.2). The collector must map each reply byte back to its channel.
 * **The record-count field (C.4)** is written by the PC when it saves the file. It has no meaning on the serial link.
+
+#### C.9 Writing this format (the collector's `.log` file)
+The collector also writes each session in this format, so that it can be opened in C-Com WP, which applies its own conversions (including the temperature and MAP conversions that 3.C.6 does not yet have). The file has no GPS data.
+* **Header:** built from the channel template exactly as C.2–C.4 describe, with the layout block and the four unknown data-header values written as the constants seen in every sample. Verified: the writer reproduces all three sample logs byte for byte, both from their own headers and (for `world_finals_run_4.log`) from `CHANNEL_TEMPLATE.txt`.
+* **Records:** C.5 layout. The ms field is the Pi's monotonic time since the session's first row (0 for the first record). Each raw value is the poll reply byte for that channel, in channel-table order.
+* **Any channel list works:** C-Com WP opened a file with 5 of the 11 channels in another order, a list it never saved itself (tested 2026-11-17).
+* **Record count:** C-Com WP trusts the count in the header. It shows no records beyond it, and a count of 0 shows no data (tested 2026-11-17). The collector therefore writes the header with a count of 0, and at every flush (`FLUSH_INTERVAL_S`, 1 s) first forces the records to disk and then writes the new count. After a power cut the count is never ahead of the records on disk, and at most the last second of records is hidden from C-Com WP. `python3 parse_ecu_log.py FILE --repair` sets the count to the complete records in the file and makes them visible again.
+* **Name:** the CSV's name with `.log` in place of `.csv`. The collector never overwrites either file: if either name exists, both move to the next `_N` suffix.
 * **Timing:** the 100 ms average and the 78–125 ms jitter in the samples are the PC's poll timer, not an ECU property.
 
 #### C.8 Acceptance check for the parser
@@ -237,7 +248,7 @@ All four are Verified (13 block reads, 12 writes, 228 polls, every checksum corr
 * **Poll reply:** `FC` returns *N* value bytes in table order and one checksum byte, about 13 ms after the echo for 11 channels (Verified). The collector reads exactly *N* + 1 bytes within `ECU_REPLY_TIMEOUT_MS` and checks the checksum.
 * **Captured example (11 channels):** table `46 24 28 22 26 83 B5 4A 92 2A 96 00` at `0x00B6`–`0x00C1` (RPM, Coolant, Air Temp, TPS, Battery, Spark, Inj. DC, O2 Corr., Target A/F, MAP, Actual A/F); reply `00 B2 FE 1C 6C 50 00 80 00 F0 FF F7`.
 * **Channel template:** the channels of a session come from the header of a C-Com log file (3.C) named by `ECU_CHANNEL_TEMPLATE`. To change the logged channels, the operator sets up the dashboard in the PC software, saves a short log, and copies that file to the Pi. Only the header is used. The collector reads the template at the start of every session.
-* **Text template:** `ECU_CHANNEL_TEMPLATE` may instead name a text file holding the same channel table, one channel per line, with the columns `name, unit, index, id, conv, scale, offset, display_min, display_max, format`. Lines starting with `#` are comments. The order of the lines is the order of the ECU columns in the CSV; the poll table is still written in ascending `index` order. `python3 parse_ecu_log.py LOGFILE --template OUT.txt` writes such a file from a C-Com log. The repository's `CHANNEL_TEMPLATE.txt`, extracted from `world_finals_run_4.log` (11 channels starting `TPS (%), RPM, Battery (V)`), is the normal channel set and order.
+* **Text template:** `ECU_CHANNEL_TEMPLATE` may instead name a text file holding the same channel table, one channel per line, with the columns `name, unit, index, id, conv, scale, offset, display_min, display_max, format, flag`. Lines starting with `#` are comments. The order of the lines is the order of the ECU columns in the CSV; the poll table is still written in ascending `index` order. `python3 parse_ecu_log.py LOGFILE --template OUT.txt` writes such a file from a C-Com log. The repository's `CHANNEL_TEMPLATE.txt`, extracted from `world_finals_run_4.log` (11 channels starting `TPS (%), RPM, Battery (V)`), is the normal channel set and order.
 * **Write guard (safety):** `FE` changes ECU memory. The collector must refuse to send any `FE` whose address is outside `0x00B6` … `0x00B6 + ECU_POLL_TABLE_MAX_CHANNELS`, and must have no other code path that sends `FE`. Only `0x00B6`–`0x00C1` (11 channels and the end marker) were seen being written, so `ECU_POLL_TABLE_MAX_CHANNELS` defaults to **11**. A template with more channels is refused with a clear error until a capture confirms a longer table (D.7).
 * **What the PC does that the collector does not:** on connecting, the PC reads the 2 KB calibration (`0x7800`–`0x7FFF`) and three small values (`FF 00 54`, `FF 7F FF`, `FD 7F FD 7F FF`). None of the logging traffic depends on them. That they can be skipped is **[TBD]** until tried from a cold ECU.
 
@@ -269,7 +280,7 @@ Session rules:
 * **The poll table is written at the start of every session**, never assumed to be still in the ECU (whether it survives an ECU power cycle is **[TBD]**).
 * **A failed poll** (missing or wrong echo, short reply, wrong checksum) writes no row. The collector discards the input, counts the failure, and polls again at the next scheduled time. A valid reply resets the count.
 * **Row time:** each row is timed by the Pi when its reply is complete. The ECU supplies no time. Elapsed session time, where needed, comes from the Pi's monotonic clock and starts at 0 with the first row.
-* **Closing a session** flushes and closes the CSV file. Nothing is sent to the ECU to stop: the collector simply stops polling (Verified: the PC sends no stop command). The file is never reopened later.
+* **Closing a session** flushes and closes the CSV file and the `.log` file (writing its final record count). Nothing is sent to the ECU to stop: the collector simply stops polling (Verified: the PC sends no stop command). The file is never reopened later.
 * **Channel set per session:** the CSV columns after the four GPS columns come from the template read at the start of that session, in the template's channel-table order (not poll-table order).
 
 #### D.4 Who starts and stops sessions
@@ -308,6 +319,7 @@ Read at start-up from `/etc/ecu_hub/collector.conf`, each with a command-line ov
 | `ECU_IDENT_EXPECT` | string | `SEFI8LO` | Expected identity text; a different text is logged as a warning only |
 | `ECU_POLL_TABLE_MAX_CHANNELS` | integer | `11` | Largest channel count the collector will write to the poll table (write guard, D.2) |
 | `GPS_SYNC_WAIT_S` | integer | `60` | At start-up, the longest the collector waits for a GPS time fix before its first attempt |
+| `WRITE_NATIVE_LOG` | boolean | `true` | Also write each session as a C-Com WP log beside the CSV (3.C.9) |
 
 The command bytes (`FC`, `FD`, `FE`) and the poll-table base address `0x00B6` are constants in the code, not parameters: a wrong value could write to the wrong ECU memory.
 
@@ -334,7 +346,7 @@ The command bytes (`FC`, `FD`, `FE`) and the poll-table base address `0x00B6` ar
 
 ### Tier 2: File Delivery Web Interface (`server.py`)
 * Exposes a fast directory index mapping `/var/log/ecu_hub/data/`.
-* Renders a native anchor tree list layout allowing operators to seamlessly navigate the day directories, see that day's session files (one per session, newest first), and download target merged `.csv` files.
+* Renders a native anchor tree list layout allowing operators to seamlessly navigate the day directories, see that day's session files (one per session, newest first), and download target merged `.csv` files and each session's C-Com WP `.log` file.
 * Shows the collector's state from `STATUS`, with **New session** and **Stop logging** buttons that send `NEW_SESSION` and `STOP` over the control socket (Section 3.D.4). The status page refreshes itself every 5 seconds.
 * A **Restart collector service** button runs `sudo -n systemctl restart ecu-collector.service` (Section 5). It is the way to recover when the collector is not running and `STATUS` cannot be reached.
 * Only names of the forms `YYYY-MM-DD` or `unsynced` (directories), `log_*.csv` and `plot_*.png` are served. Anything else returns 404.

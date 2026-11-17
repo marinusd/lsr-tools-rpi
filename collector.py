@@ -53,6 +53,8 @@ PARAMS = [
     ('GPS_SYNC_WAIT_S', float, 60, 'longest wait for GPS time before the first attempt'),
     ('FILE_TIMEZONE', str, None, 'time zone of directory and file names (default: local)'),
     ('FLUSH_INTERVAL_S', float, 1, 'how often rows are forced to disk'),
+    ('WRITE_NATIVE_LOG', bool, True,
+     'also write each session as a C-Com WP log (.log, no GPS) beside the CSV'),
     ('DATA_DIR', str, '/var/log/ecu_hub/data', 'where the day directories go'),
     ('CONTROL_SOCKET', str, '/run/ecu_hub/control.sock', 'control socket for the web interface'),
     ('MAP_PSIA_PER_COUNT', float, None, 'MAP conversion; unset = write raw counts'),
@@ -415,10 +417,19 @@ class GpsReader(threading.Thread):
 # Collector state machine (spec.md 3.D.3 to 3.D.5)
 # ---------------------------------------------------------------------------
 class Session:
-    def __init__(self, path, handle, channels, order, funcs):
+    def __init__(self, path, handle, native, channels, order, funcs):
         self.path, self.handle = path, handle
+        self.native = native                # parse_ecu_log.LogWriter, or None
         self.writer = csv.writer(handle)
         self.channels, self.order, self.funcs = channels, order, funcs
+        self.last_flush = time.monotonic()
+        self.start = None                   # monotonic time of the first row
+
+    def sync(self):
+        self.handle.flush()
+        os.fsync(self.handle.fileno())
+        if self.native is not None:
+            self.native.sync()
         self.last_flush = time.monotonic()
 
 
@@ -433,7 +444,8 @@ class Collector:
         self._link = None
         self._session = None
         self._lock = threading.Lock()
-        self._status = {'state': 'IDLE', 'file': None, 'rows': 0, 'failed_polls': 0,
+        self._status = {'state': 'IDLE', 'file': None, 'native_file': None, 'rows': 0,
+                        'failed_polls': 0,
                         'last_row_time': None, 'channels': 0, 'failed_attempts': 0,
                         'last_error': None}
         self._next_attempt = None
@@ -532,6 +544,8 @@ class Collector:
                 log.warning('%s: %s', template, note)
             order = parse_ecu_log.poll_order(channels)
             names, funcs = make_converters(channels, self.cfg)
+            if self.cfg['WRITE_NATIVE_LOG']:
+                parse_ecu_log.header_bytes(channels)    # refuse a template it cannot write
 
             ident = self._link.identity().decode('ascii', 'replace')
             if ident != self.cfg['ECU_IDENT_EXPECT']:
@@ -540,8 +554,8 @@ class Collector:
             self._link.write_poll_table([channels[k].id for k in order])
             reply = self._link.poll(len(channels))
 
-            path, handle = self._new_log_file()
-            self._session = Session(path, handle, channels, order, funcs)
+            path, handle, native = self._new_log_files(channels)
+            self._session = Session(path, handle, native, channels, order, funcs)
             self._session.writer.writerow(GPS_COLUMNS + names)
         except (EcuError, OSError, parse_ecu_log.FormatError) as e:
             if isinstance(e, OSError):
@@ -559,8 +573,9 @@ class Collector:
             again = self._status['failed_attempts'] > 0
         log.info('%s; logging %d channels to %s',
                  'ECU connection made again' if again else 'ECU connected', len(channels), path)
-        self._set(state='LOGGING', file=path, rows=0, failed_polls=0, last_row_time=None,
-                  channels=len(channels), failed_attempts=0, last_error=None)
+        self._set(state='LOGGING', file=path, native_file=native.path if native else None,
+                  rows=0, failed_polls=0, last_row_time=None, channels=len(channels),
+                  failed_attempts=0, last_error=None)
         self._write_row(reply)
         return True
 
@@ -603,29 +618,38 @@ class Collector:
 
     def _write_row(self, reply):
         s = self._session
+        now = time.monotonic()
+        if s.start is None:
+            s.start = now
         values = [''] * len(s.channels)
+        raws = [0] * len(s.channels)
         for position, k in enumerate(s.order):
+            raws[k] = reply[position]
             values[k] = s.funcs[k](reply[position])
         s.writer.writerow(self.gps.row_fields() + values)
+        if s.native is not None:
+            s.native.add(round((now - s.start) * 1000), raws)
         with self._lock:
             self._status['rows'] += 1
             self._status['last_row_time'] = datetime.now(timezone.utc).strftime(
                 '%Y-%m-%dT%H:%M:%SZ')
-        now = time.monotonic()
         if now - s.last_flush >= self.cfg['FLUSH_INTERVAL_S']:
-            s.handle.flush()
-            os.fsync(s.handle.fileno())
-            s.last_flush = now
+            s.sync()
 
     def _close_session(self):
         if self._session is None:
             return
+        s = self._session
         try:
-            self._session.handle.flush()
-            os.fsync(self._session.handle.fileno())
-            self._session.handle.close()
+            s.sync()
         except OSError as e:
-            log.error('closing %s: %s', self._session.path, e)
+            log.error('closing %s: %s', s.path, e)
+        for handle in (s.handle, s.native):
+            if handle is not None:
+                try:
+                    handle.close()
+                except OSError as e:
+                    log.error('closing %s: %s', s.path, e)
         log.info('session closed: %s (%d rows)', self._session.path, self._status['rows'])
         self._session = None
 
@@ -638,7 +662,8 @@ class Collector:
         self._ser = self._link = None
 
     # ---- file naming (spec.md 3.A) -------------------------------------------------
-    def _new_log_file(self):
+    def _new_log_files(self, channels):
+        """Open log_XXXX.csv and, if enabled, log_XXXX.log with the same name stem."""
         data = self.cfg['DATA_DIR']
         if self.gps.clock_synced.is_set():
             now = datetime.now(self._tz)
@@ -649,13 +674,25 @@ class Collector:
             folder = os.path.join(data, 'unsynced')
             os.makedirs(folder, exist_ok=True)
             base = f'log_boot{self._boot_number(folder)}_{int(time.monotonic())}'
+        native_on = self.cfg['WRITE_NATIVE_LOG']
         n = 1
         while True:
-            path = os.path.join(folder, base + ('' if n == 1 else f'_{n}') + '.csv')
+            stem = os.path.join(folder, base + ('' if n == 1 else f'_{n}'))
+            n += 1
+            if native_on and os.path.exists(stem + '.log'):
+                continue
             try:
-                return path, open(path, 'x', newline='')
+                handle = open(stem + '.csv', 'x', newline='')
             except FileExistsError:
-                n += 1
+                continue
+            native = None
+            if native_on:
+                try:
+                    native = parse_ecu_log.LogWriter(stem + '.log', channels)
+                except BaseException:
+                    handle.close()
+                    raise
+            return stem + '.csv', handle, native
 
     @staticmethod
     def _boot_number(folder):
