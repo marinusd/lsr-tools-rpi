@@ -85,6 +85,14 @@ class ServerTest(unittest.TestCase):
         got = self.web.get(f'/day/{day}/{name}')
         self.assertEqual(got.status_code, 200)
         self.assertIn('attachment', got.headers['Content-Disposition'])
+        native = name[:-4] + '.log'
+        self.assertIn(f'/day/{day}/{native}', page)
+        log = self.web.get(f'/day/{day}/{native}')
+        self.assertEqual((log.status_code, log.mimetype), (200, 'application/octet-stream'))
+        self.assertEqual(log.get_data()[:2], b'22')
+        log.close()
+        self.assertEqual(self.web.get(f'/day/{day}/log_9999.log').status_code, 404)
+        self.assertEqual(self.web.get(f'/day/{day}/{native}/plot').status_code, 404)
         first = got.get_data(as_text=True).splitlines()[0]
         self.assertTrue(first.startswith('GPS_Timestamp,GPS_Latitude,GPS_Longitude,GPS_Speed_MPH,TPS (%)'))
         got.close()

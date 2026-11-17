@@ -19,6 +19,10 @@ data and vehicle speed in one file.
 - **Writes one CSV file per logging session**, grouped into a folder per day
   (`YYYY-MM-DD/log_HHMM.csv`). Rows are forced to disk every second, so a
   power cut loses very little.
+- **Also writes each session as a C-Com WP log** (`log_HHMM.log`, no GPS),
+  which opens in C-Com WP on Windows with C-Com's own conversions. After a
+  power cut, `python3 parse_ecu_log.py FILE --repair` recovers the last second
+  of records in that file.
 - **Starts by itself at boot.** If the ECU is off, it retries every 60 seconds
   and begins logging when the ECU answers. If the ECU drops out mid-session,
   it closes the file and starts a new one when the ECU returns.

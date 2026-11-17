@@ -29,6 +29,7 @@ import collector as collector_module
 
 DAY_RE = re.compile(r'^(\d{4}-\d\d-\d\d|unsynced)$')
 LOG_RE = re.compile(r'^log_\w+\.csv$')
+NATIVE_RE = re.compile(r'^log_\w+\.log$')        # the same session in C-Com WP's format
 PLOT_RE = re.compile(r'^plot_[\w.\-]+\.png$')
 TIME_COLUMN = 'GPS_Timestamp'
 DEFAULT_METRICS = ('RPM', 'GPS_Speed_MPH')
@@ -108,7 +109,9 @@ def list_sessions(day):
         info = os.stat(os.path.join(folder, name))
         stem = plot_stem(name)
         plots = sorted(p for p in names if PLOT_RE.match(p) and p.startswith(stem + '_'))
+        native = name[:-len('.csv')] + '.log'
         sessions.append({'name': name, 'size': human_size(info.st_size), 'mtime': info.st_mtime,
+                         'native': native if native in names else None,
                          'modified': datetime.fromtimestamp(info.st_mtime).strftime('%H:%M:%S'),
                          'plots': plots})
     sessions.sort(key=lambda s: s['mtime'], reverse=True)       # newest first
@@ -258,10 +261,11 @@ INDEX = """
 
 DAY = """
 <h1>{{ day }}</h1>
-{% if sessions %}<table><tr><th>Session file</th><th>Size</th><th>Last written</th><th></th><th>Plots</th></tr>
+{% if sessions %}<table><tr><th>Session file</th><th>Size</th><th>Last written</th><th>C-Com WP</th><th></th><th>Plots</th></tr>
 {% for s in sessions %}<tr>
 <td><a href="{{ url_for('download', day=day, name=s.name) }}">{{ s.name }}</a>{% if s.name == active %} <span class="note">(logging now)</span>{% endif %}</td>
 <td>{{ s.size }}</td><td>{{ s.modified }}</td>
+<td>{% if s.native %}<a href="{{ url_for('download', day=day, name=s.native) }}">{{ s.native }}</a>{% else %}-{% endif %}</td>
 <td><a href="{{ url_for('plot_form', day=day, name=s.name) }}">New plot</a></td>
 <td>{% for p in s.plots %}<a href="{{ url_for('plot_view', day=day, plot=p) }}">{{ p }}</a><br>{% endfor %}</td>
 </tr>{% endfor %}</table>{% else %}<p>No session files in this directory.</p>{% endif %}
@@ -343,9 +347,15 @@ def day(day):
 
 @app.route('/day/<day>/<name>')
 def download(day, name):
-    log_path(day, name)
+    if NATIVE_RE.match(name):
+        if not os.path.isfile(os.path.join(day_dir(day), name)):
+            abort(404)
+        mimetype = 'application/octet-stream'
+    else:
+        log_path(day, name)
+        mimetype = 'text/csv'
     return send_from_directory(day_dir(day), name, as_attachment=True,
-                               mimetype='text/csv', max_age=0)
+                               mimetype=mimetype, max_age=0)
 
 
 @app.route('/day/<day>/<name>/plot', methods=['GET', 'POST'])

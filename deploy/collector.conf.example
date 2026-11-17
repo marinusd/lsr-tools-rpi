@@ -23,6 +23,7 @@ GPS_BAUD = 9600
 # ECU_RETRY_INTERVAL_S = 60
 # GPS_SYNC_WAIT_S = 60
 # FILE_TIMEZONE = America/Los_Angeles      (default: the Pi's time zone)
+# WRITE_NATIVE_LOG = true                  (also write a C-Com WP .log beside each CSV)
 
 # --- conversions (unset = the channel is written as raw counts) -------------
 # MAP_PSIA_PER_COUNT = 0.0597

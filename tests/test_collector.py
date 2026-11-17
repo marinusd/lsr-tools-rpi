@@ -6,6 +6,7 @@
 import csv
 import glob
 import os
+import shutil
 import sys
 import tempfile
 import threading
@@ -96,6 +97,63 @@ class TemplateTest(unittest.TestCase):
         good = parse_ecu_log.template_text(load(SAMPLE_1)[0].channels)
         with self.assertRaises(parse_ecu_log.FormatError):
             parse_ecu_log.parse_template_text(good.replace('0x46', 'zz'))
+
+
+class WriterTest(unittest.TestCase):
+    """parse_ecu_log.header_bytes() and record_bytes() write the PC software's format."""
+
+    def rebuild(self, channels, buf):
+        hdr = parse_ecu_log.parse_header(buf)
+        return (parse_ecu_log.header_bytes(channels, hdr.record_count)
+                + b''.join(parse_ecu_log.record_bytes(r[0], r[1:])
+                           for r in parse_ecu_log.records(buf, hdr)))
+
+    def test_rebuilds_each_sample_byte_for_byte(self):
+        for sample in (SAMPLE_1, SAMPLE_2, FAST):
+            buf = parse_ecu_log.read_bytes(sample)
+            channels = parse_ecu_log.parse_header(buf).channels
+            self.assertEqual(self.rebuild(channels, buf), buf, sample)
+
+    def test_rebuilds_from_the_text_template(self):
+        channels, _ = parse_ecu_log.load_template(os.path.join(ROOT, 'CHANNEL_TEMPLATE.txt'))
+        buf = parse_ecu_log.read_bytes(SAMPLE_1)
+        self.assertEqual(self.rebuild(channels, buf), buf)
+
+    def test_count_can_be_updated_in_place(self):
+        channels = load(SAMPLE_1)[0].channels
+        out = bytearray(parse_ecu_log.header_bytes(channels, 0))
+        for k in range(7):
+            out += parse_ecu_log.record_bytes(k * 100, [k] * len(channels))
+        offset = parse_ecu_log.count_offset(len(channels))
+        out[offset:offset + 4] = (7).to_bytes(4, 'little')
+        hdr = parse_ecu_log.parse_header(bytes(out))
+        self.assertEqual(hdr.record_count, 7)
+        self.assertEqual([r[0] for r in parse_ecu_log.records(bytes(out), hdr)],
+                         [0, 100, 200, 300, 400, 500, 600])
+
+    def test_log_writer_and_repair(self):
+        channels = load(SAMPLE_1)[0].channels
+        path = os.path.join(tempfile.mkdtemp(), 'log_0000.log')
+        self.addCleanup(shutil.rmtree, os.path.dirname(path))
+        w = parse_ecu_log.LogWriter(path, channels)
+        for k in range(5):
+            w.add(k * 100, [k] * 11)
+        w.sync()
+        for k in range(5, 8):                      # written, but the count not yet updated
+            w.add(k * 100, [k] * 11)
+        w._file.flush()
+        self.assertEqual(parse_ecu_log.parse_header(parse_ecu_log.read_bytes(path)).record_count, 5)
+        self.assertEqual(parse_ecu_log.repair(path), (5, 8))
+        self.assertEqual(parse_ecu_log.repair(path), (8, 8))
+        w.close()
+        with self.assertRaises(FileExistsError):
+            parse_ecu_log.LogWriter(path, channels)
+
+    def test_refuses_fields_that_do_not_fit(self):
+        channels = load(SAMPLE_1)[0].channels
+        for change in ({'name': 'x' * 17}, {'unit': 'x' * 9}, {'fmt': '%10.2f is long'}):
+            with self.assertRaises(parse_ecu_log.FormatError):
+                parse_ecu_log.header_bytes([channels[0]._replace(**change)])
 
 
 class LinkTest(unittest.TestCase):
@@ -222,6 +280,42 @@ class CollectorTest(unittest.TestCase):
         self.assertEqual(self.ecu.fe_writes,
                          [(0x00B6 + i, v) for i, v in enumerate(CAPTURED_TABLE)])
 
+    def test_native_log_beside_the_csv(self):
+        self.start()
+        self.assertTrue(wait_for(lambda: self.c.status()['rows'] >= 30))
+        native = self.c.status()['native_file']
+        self.assertEqual(native, self.c.status()['file'][:-4] + '.log')
+        # while logging, the count in the header is never ahead of the records
+        buf = parse_ecu_log.read_bytes(native)
+        hdr = parse_ecu_log.parse_header(buf)
+        on_disk = (len(buf) - hdr.data_start) // hdr.record_size
+        self.assertGreater(hdr.record_count, 0)
+        self.assertLessEqual(hdr.record_count, on_disk)
+        self.c.commands.put('STOP')
+        self.assertTrue(wait_for(lambda: self.state() == 'IDLE'))
+
+        buf = parse_ecu_log.read_bytes(native)
+        hdr = parse_ecu_log.parse_header(buf)
+        recs = parse_ecu_log.records(buf, hdr)
+        rows = self.rows(self.files()[0])
+        self.assertEqual(hdr.channels, load(SAMPLE_1)[0].channels)
+        self.assertEqual(hdr.record_count, len(rows) - 1, 'one record per CSV row')
+        self.assertEqual(len(buf), hdr.data_start + hdr.record_count * hdr.record_size)
+        # the raw values are the replayed records, in channel-table order
+        source = parse_ecu_log.records(parse_ecu_log.read_bytes(SAMPLE_1),
+                                       load(SAMPLE_1)[0]._replace(record_count=10 ** 6))
+        self.assertEqual([r[1:] for r in recs], [r[1:] for r in source[:len(recs)]])
+        times = [r[0] for r in recs]
+        self.assertEqual(times[0], 0)
+        self.assertTrue(all(b > a for a, b in zip(times, times[1:])), 'ms strictly increase')
+        self.assertAlmostEqual(times[-1] / (len(times) - 1), 10, delta=5)   # 10 ms polls
+
+    def test_native_log_can_be_turned_off(self):
+        self.start(WRITE_NATIVE_LOG=False)
+        self.assertTrue(wait_for(lambda: self.c.status()['rows'] >= 3))
+        self.assertIsNone(self.c.status()['native_file'])
+        self.assertEqual(glob.glob(os.path.join(self.tmp.name, '*', '*.log')), [])
+
     def test_new_session_makes_a_second_file(self):
         self.start()
         self.assertTrue(wait_for(lambda: self.c.status()['rows'] >= 5))
@@ -231,6 +325,8 @@ class CollectorTest(unittest.TestCase):
                                  and self.c.status()['rows'] >= 5))
         self.assertEqual(len(self.files()), 2)
         self.assertEqual(len(self.ecu.fe_writes), 24, 'poll table written for each session')
+        natives = sorted(glob.glob(os.path.join(self.tmp.name, '*', '*.log')))
+        self.assertEqual([n[:-4] for n in natives], [f[:-4] for f in self.files()])
         if os.path.dirname(first) == os.path.dirname(self.c.status()['file']) and \
                 first[-8:-4] == self.c.status()['file'][-10:-6]:
             self.assertTrue(self.c.status()['file'].endswith('_2.csv'))
