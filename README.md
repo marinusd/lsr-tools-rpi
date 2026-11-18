@@ -44,7 +44,7 @@ session; see `PROTOCOL.md` for the commands and `spec.md` for the full design.
 | File | Purpose |
 |---|---|
 | `collector.py` | The logger: ECU polling, GPS, sessions, CSV output, control socket |
-| `server.py` | Web page on port 8080: collector status, New session / Stop buttons, log downloads, plots |
+| `server.py` | Web page on port 80: collector status, New session / Stop buttons, log downloads, plots |
 | `ecuctl.py` | Command-line control: `STATUS`, `NEW_SESSION`, `STOP` |
 | `mock_serial.py` | Simulated ECU and GPS, so everything runs without the car |
 | `parse_ecu_log.py` | Reads C-Com WP `.log` files; writes a text channel template from one |
@@ -75,7 +75,7 @@ On Raspberry Pi OS Lite (Debian 12), from a copy of this repository:
 
 This installs the Python libraries, copies the program to `/opt/ecu_hub`,
 creates the service accounts, and enables two services that start at boot:
-`ecu-collector` (the logger) and `ecu-web` (the web page on port 8080). Then
+`ecu-collector` (the logger) and `ecu-web` (the web page on port 80). Then
 set `ECU_PORT` and `GPS_PORT` in `/etc/ecu_hub/collector.conf` and run
 `sudo systemctl restart ecu-collector`. Logs are written to
 `/var/log/ecu_hub/data/`.

@@ -5,7 +5,7 @@ Lists the day directories and their session files, lets the operator download
 a CSV, shows the collector's state with New session / Stop logging buttons,
 and draws plots of chosen columns on the server.
 
-    python server.py                 real paths, port 8080
+    python server.py                 real paths, port 8080 (ecu-web.service uses --port 80)
     python server.py --mock          the ./mock_data of `collector.py --mock`
 
 The server never touches the ECU serial port. It talks to the collector only

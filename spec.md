@@ -374,12 +374,13 @@ The command bytes (`FC`, `FD`, `FE`) and the poll-table base address `0x00B6` ar
 
 The process management deployment leverages two systemd configuration engines:
 * `ecu-collector.service`: Starts at system boot, initializes the GPS serial link first to synchronize time parameters, then by default starts a session by writing the poll table and polling the ECU (Section 3.D). If the ECU does not respond, it retries every 60 s until it does (3.D.5); the service keeps running and does not exit or restart because of this. On stop it stops polling and closes the current file.
-* `ecu-web.service`: Serves the application directory interface on port `8080`.
+* `ecu-web.service`: Serves the application directory interface on port `80`. (`server.py` itself defaults to `8080`, so it can be run by hand without privileges; the service passes `--port 80`.)
 The web interface accesses service toggles securely by using explicit sudo authorization rule mappings written inside `/etc/sudoers.d/ecu_control`. The rule allows the `ecu-web` user exactly one command: `systemctl restart ecu-collector.service`.
 
 Deployment details (files in `deploy/`, installed by `deploy/install.sh` to `/opt/ecu_hub`):
 * **Accounts:** the collector runs as `ecu-collector`, the web interface as `ecu-web`. Both have the primary group `ecu-hub`, and neither is root.
 * **Collector privileges:** group `dialout` for the serial ports, and the single capability `CAP_SYS_TIME` so that it can set the clock from GPS.
+* **Web interface privileges:** the single ambient capability `CAP_NET_BIND_SERVICE`, so that it can listen on port 80. Its capability bounding set is left alone, because the restart button runs `sudo`, which needs it.
 * **Shared files:** both services use umask 0002, so logs and day directories are group-writable and the web interface can write plots next to the CSV files.
 * **Control socket:** systemd creates `/run/ecu_hub` (mode 0750, group `ecu-hub`) for the collector; the socket inside is mode 0660. Only `ecu-collector` and members of `ecu-hub` can reach it.
 * **Settings:** both services read `/etc/ecu_hub/collector.conf`.
