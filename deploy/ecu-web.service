@@ -1,7 +1,7 @@
-# ECU data hub web interface on port 8080 (spec.md section 5).
+# ECU data hub web interface on port 80 (spec.md section 5).
 # Installed by deploy/install.sh as /etc/systemd/system/ecu-web.service
 [Unit]
-Description=ECU data hub web interface (port 8080)
+Description=ECU data hub web interface (port 80)
 Documentation=file:/opt/ecu_hub/spec.md
 After=network.target ecu-collector.service
 Wants=ecu-collector.service
@@ -11,11 +11,15 @@ Type=simple
 User=ecu-web
 Group=ecu-hub
 UMask=0002
+# Port 80 is privileged. This one capability lets the non-root ecu-web user listen on it.
+# No CapabilityBoundingSet= here: it would also bind sudo, and the web page's
+# "Restart collector service" button runs sudo.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 WorkingDirectory=/opt/ecu_hub
 # matplotlib needs a writable directory for its font cache; ecu-web has no home directory
 CacheDirectory=ecu_web
 Environment=PYTHONUNBUFFERED=1 MPLCONFIGDIR=/var/cache/ecu_web
-ExecStart=/usr/bin/python3 /opt/ecu_hub/server.py
+ExecStart=/usr/bin/python3 /opt/ecu_hub/server.py --port 80
 Restart=on-failure
 RestartSec=5
 

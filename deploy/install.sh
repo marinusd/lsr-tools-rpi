@@ -40,7 +40,7 @@ systemctl enable ecu-collector.service ecu-web.service
 systemctl restart ecu-collector.service ecu-web.service
 
 echo
-echo "Installed. Web page: http://$(hostname):8080/"
+echo "Installed. Web page: http://$(hostname)/"
 echo "Status:   systemctl status ecu-collector ecu-web"
 echo "Journal:  journalctl -u ecu-collector -f"
 echo "Control:  sudo -u ecu-web python3 $DEST/ecuctl.py STATUS"
