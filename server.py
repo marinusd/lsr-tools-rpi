@@ -34,10 +34,12 @@ PLOT_RE = re.compile(r'^plot_[\w.\-]+\.png$')
 TIME_COLUMN = 'GPS_Timestamp'
 DEFAULT_METRICS = ('RPM', 'GPS_Speed_MPH')
 SERVICE = 'ecu-collector.service'
+POWEROFF = ['/usr/bin/systemctl', 'poweroff']
+SHUTDOWN_DELAY_S = 3            # time for the 'shutting down' page to reach the browser
 MAX_PLOT_NAME = 120
 
 app = Flask(__name__)
-settings = {'DATA_DIR': None, 'CONTROL_SOCKET': None}
+settings = {'DATA_DIR': None, 'CONTROL_SOCKET': None, 'MOCK': False}
 _plot_lock = threading.Lock()          # matplotlib's pyplot is not thread-safe
 _pyplot = None
 
@@ -251,6 +253,9 @@ INDEX = """
 <form class="inline" method="post" action="{{ url_for('restart') }}">
   <button>Restart collector service</button>
 </form>
+<form class="inline" method="get" action="{{ url_for('shutdown') }}">
+  <button>Shut down Pi</button>
+</form>
 <p class="note">This page refreshes every 5 seconds.</p>
 </div>
 <h2>Logs by day</h2>
@@ -279,6 +284,31 @@ PLOT_FORM = """
 {% endfor %}
 <p><button>Draw plot</button></p>
 </form>
+"""
+
+SHUTDOWN_CONFIRM = """
+<h1>Shut down the Raspberry Pi?</h1>
+<div class="box">
+<p>Logging stops and the current session's files are closed. Then the Pi shuts down.
+This web page will stop answering.</p>
+<p>{% if st.error %}Collector: <span class="bad">{{ st.error }}</span>
+{% else %}Collector state now: <span class="state">{{ st.state }}</span>
+{% if st.state == 'LOGGING' %} ({{ st.rows }} rows in the current session){% endif %}{% endif %}</p>
+<p>To start the Pi again afterwards, disconnect its power and connect it again.</p>
+<form class="inline" method="post"><button>Shut down now</button></form>
+<form class="inline" method="get" action="{{ url_for('index') }}"><button>Cancel</button></form>
+</div>
+"""
+
+SHUTDOWN_STARTED = """
+<h1>Shutting down</h1>
+<div class="box">
+<p>Logging has been stopped and the Pi is shutting down.</p>
+<p><b>Wait until the Pi's green light has stopped flashing</b> (about 20 seconds) before
+you disconnect its power.</p>
+<p class="note">If this page still opens after a minute, the shutdown did not happen:
+see <code>journalctl -u ecu-web</code>.</p>
+</div>
 """
 
 PLOT_VIEW = """
@@ -332,6 +362,40 @@ def restart():
         time.sleep(1)
         return redirect(url_for('index', message='Collector service restarted.'))
     return redirect(url_for('index', message=f'Could not restart the service: {detail}', bad=1))
+
+
+def _poweroff_later():
+    """Runs in a thread, so that the 'shutting down' page is sent first."""
+    time.sleep(SHUTDOWN_DELAY_S)
+    try:
+        done = subprocess.run(['sudo', '-n', *POWEROFF], capture_output=True, text=True,
+                              timeout=30)
+        if done.returncode != 0:
+            app.logger.error('shutdown failed: %s', done.stderr.strip())
+    except (OSError, subprocess.TimeoutExpired) as e:
+        app.logger.error('shutdown failed: %s', e)
+
+
+@app.route('/shutdown', methods=['GET', 'POST'])
+def shutdown():
+    """Shut the Pi down through the sudo rule in /etc/sudoers.d/ecu_control."""
+    if request.method == 'GET':
+        return page('Shut down', SHUTDOWN_CONFIRM, crumbs=[('Shut down', None)],
+                    st=control('STATUS'))
+    if settings['MOCK']:
+        return redirect(url_for('index', message='Mock mode: this computer is not shut down.'))
+    # check the sudo rule now, so that a refusal can be shown on the page
+    try:
+        allowed = subprocess.run(['sudo', '-n', '-l', *POWEROFF], capture_output=True,
+                                 text=True, timeout=10).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        allowed = False
+    if not allowed:
+        return redirect(url_for('index', bad=1, message='Shutdown is not permitted: the sudo '
+                                'rule in /etc/sudoers.d/ecu_control is missing.'))
+    control('STOP')         # close the session's files now; the collector also does it on stop
+    threading.Thread(target=_poweroff_later, name='poweroff', daemon=True).start()
+    return page('Shutting down', SHUTDOWN_STARTED)
 
 
 @app.route('/day/<day>/')
@@ -397,9 +461,10 @@ def plot_image(day, plot):
 
 
 # ---------------------------------------------------------------------------
-def configure(data_dir, control_socket):
+def configure(data_dir, control_socket, mock=False):
     settings['DATA_DIR'] = data_dir
     settings['CONTROL_SOCKET'] = control_socket
+    settings['MOCK'] = mock
 
 
 def main(argv=None):
@@ -414,7 +479,8 @@ def main(argv=None):
     # the same settings file and defaults as the collector
     _, cfg = collector_module.load_config(['--config', args.config] +
                                           (['--mock'] if args.mock else []))
-    configure(args.data_dir or cfg['DATA_DIR'], args.control_socket or cfg['CONTROL_SOCKET'])
+    configure(args.data_dir or cfg['DATA_DIR'], args.control_socket or cfg['CONTROL_SOCKET'],
+              mock=args.mock)
     app.run(host=args.host, port=args.port, threaded=True)
 
 

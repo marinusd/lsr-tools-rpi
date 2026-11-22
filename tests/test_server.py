@@ -7,11 +7,13 @@ import glob
 import os
 import resource
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -174,6 +176,88 @@ class ServerTest(unittest.TestCase):
             server.configure(self.data, self.control.path)
         self.assertIn('collector not reachable', page)
         self.assertIn('Restart collector service', page)
+
+
+class ShutdownTest(unittest.TestCase):
+    """The Shut down Pi control. subprocess is replaced, so nothing is ever powered off."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.sock = os.path.join(self.tmp.name, 'control.sock')
+        cfg = {name: default for name, _k, default, _h in col.PARAMS}
+        cfg.update(DATA_DIR=self.tmp.name, ECU_POLL_INTERVAL_MS=10, ECU_ECHO_TIMEOUT_MS=20,
+                   ECU_REPLY_TIMEOUT_MS=20, GPS_SYNC_WAIT_S=0)
+        self.ecu = mock_serial.MockEcu(SAMPLE_1)
+
+        class Gps:
+            clock_synced = threading.Event()
+
+            def row_fields(self):
+                return ['', '', '', '']
+        Gps.clock_synced.set()
+        self.c = col.Collector(cfg, lambda: self.ecu, Gps())
+        self.control = col.ControlServer(self.sock, self.c)
+        self.control.start()
+        self.thread = threading.Thread(target=self.c.run, daemon=True)
+        self.thread.start()
+        self.addCleanup(self.finish)
+        self.assertTrue(wait_for(lambda: self.c.status()['state'] == 'LOGGING'))
+        server.configure(self.tmp.name, self.sock, mock=False)
+        self.addCleanup(server.configure, None, None, False)
+        self.web = server.app.test_client()
+        self.calls = []
+        self.allowed = True
+        self.ran = threading.Event()
+
+        def fake_run(cmd, **kwargs):
+            self.calls.append(cmd)
+            if cmd[:3] != ['sudo', '-n', '-l']:
+                self.ran.set()
+            return subprocess.CompletedProcess(cmd, 0 if self.allowed else 1, '', '')
+        patcher = mock.patch.object(server.subprocess, 'run', fake_run)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        delay = mock.patch.object(server, 'SHUTDOWN_DELAY_S', 0)
+        delay.start()
+        self.addCleanup(delay.stop)
+
+    def finish(self):
+        self.c.shutdown.set()
+        self.thread.join(3)
+        self.control.stop.set()
+        self.control.join(2)
+
+    def test_button_and_confirmation_page(self):
+        self.assertIn('Shut down Pi', self.web.get('/').get_data(as_text=True))
+        page = self.web.get('/shutdown').get_data(as_text=True)
+        self.assertIn('Shut down now', page)
+        self.assertIn('LOGGING', page)
+        self.assertEqual(self.calls, [], 'opening the confirmation page does nothing')
+
+    def test_shutdown_stops_logging_then_powers_off(self):
+        page = self.web.post('/shutdown').get_data(as_text=True)
+        self.assertIn('green light', page)
+        self.assertTrue(wait_for(lambda: self.c.status()['state'] == 'IDLE'))
+        self.assertTrue(self.ran.wait(3))
+        self.assertEqual(self.calls, [['sudo', '-n', '-l', '/usr/bin/systemctl', 'poweroff'],
+                                      ['sudo', '-n', '/usr/bin/systemctl', 'poweroff']])
+
+    def test_refused_without_the_sudo_rule(self):
+        self.allowed = False
+        reply = self.web.post('/shutdown')
+        self.assertIn('not+permitted', reply.headers['Location'])
+        time.sleep(0.2)
+        self.assertEqual(len(self.calls), 1, 'only the permission check ran')
+        self.assertEqual(self.c.status()['state'], 'LOGGING', 'logging continues')
+
+    def test_mock_mode_never_shuts_down(self):
+        server.configure(self.tmp.name, self.sock, mock=True)
+        reply = self.web.post('/shutdown')
+        self.assertIn('Mock+mode', reply.headers['Location'])
+        time.sleep(0.2)
+        self.assertEqual(self.calls, [])
+        self.assertEqual(self.c.status()['state'], 'LOGGING')
 
 
 class PlotNameTest(unittest.TestCase):

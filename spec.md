@@ -348,6 +348,7 @@ The command bytes (`FC`, `FD`, `FE`) and the poll-table base address `0x00B6` ar
 * Exposes a fast directory index mapping `/var/log/ecu_hub/data/`.
 * Renders a native anchor tree list layout allowing operators to seamlessly navigate the day directories, see that day's session files (one per session, newest first), and download target merged `.csv` files and each session's C-Com WP `.log` file.
 * Shows the collector's state from `STATUS`, with **New session** and **Stop logging** buttons that send `NEW_SESSION` and `STOP` over the control socket (Section 3.D.4). The status page refreshes itself every 5 seconds.
+* A **Shut down Pi** button opens a confirmation page. Confirming checks the sudo rule (`sudo -n -l systemctl poweroff`) and shows an error if it is missing; otherwise it sends `STOP` to the collector, shows a page telling the operator to wait for the green light to stop flashing before removing power, and runs `sudo -n systemctl poweroff` 3 seconds later, so that the page reaches the browser first. With `server.py --mock` the button never shuts anything down.
 * A **Restart collector service** button runs `sudo -n systemctl restart ecu-collector.service` (Section 5). It is the way to recover when the collector is not running and `STATUS` cannot be reached.
 * Only names of the forms `YYYY-MM-DD` or `unsynced` (directories), `log_*.csv` and `plot_*.png` are served. Anything else returns 404.
 
@@ -375,7 +376,7 @@ The command bytes (`FC`, `FD`, `FE`) and the poll-table base address `0x00B6` ar
 The process management deployment leverages two systemd configuration engines:
 * `ecu-collector.service`: Starts at system boot, initializes the GPS serial link first to synchronize time parameters, then by default starts a session by writing the poll table and polling the ECU (Section 3.D). If the ECU does not respond, it retries every 60 s until it does (3.D.5); the service keeps running and does not exit or restart because of this. On stop it stops polling and closes the current file.
 * `ecu-web.service`: Serves the application directory interface on port `80`. (`server.py` itself defaults to `8080`, so it can be run by hand without privileges; the service passes `--port 80`.)
-The web interface accesses service toggles securely by using explicit sudo authorization rule mappings written inside `/etc/sudoers.d/ecu_control`. The rule allows the `ecu-web` user exactly one command: `systemctl restart ecu-collector.service`.
+The web interface accesses service toggles securely by using explicit sudo authorization rule mappings written inside `/etc/sudoers.d/ecu_control`. The rule allows the `ecu-web` user exactly two commands: `systemctl restart ecu-collector.service` and `systemctl poweroff`.
 
 Deployment details (files in `deploy/`, installed by `deploy/install.sh` to `/opt/ecu_hub`):
 * **Accounts:** the collector runs as `ecu-collector`, the web interface as `ecu-web`. Both have the primary group `ecu-hub`, and neither is root.
