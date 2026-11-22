@@ -44,7 +44,7 @@ session; see `PROTOCOL.md` for the commands and `spec.md` for the full design.
 | File | Purpose |
 |---|---|
 | `collector.py` | The logger: ECU polling, GPS, sessions, CSV output, control socket |
-| `server.py` | Web page on port 80: collector status, New session / Stop buttons, log downloads, plots |
+| `server.py` | Web page on port 80: collector status, New session / Stop buttons, log downloads, plots, Pi shutdown |
 | `ecuctl.py` | Command-line control: `STATUS`, `NEW_SESSION`, `STOP` |
 | `mock_serial.py` | Simulated ECU and GPS, so everything runs without the car |
 | `parse_ecu_log.py` | Reads C-Com WP `.log` files; writes a text channel template from one |
